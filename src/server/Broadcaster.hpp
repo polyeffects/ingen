@@ -22,10 +22,10 @@
 #include "ingen/Interface.hpp"
 #include "ingen/Message.hpp"
 #include "ingen/URI.hpp"
-#include "ingen/types.hpp"
 #include "raul/Noncopyable.hpp"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <set>
 
@@ -42,20 +42,21 @@ namespace server {
 class Broadcaster : public Interface
 {
 public:
-	Broadcaster();
-	~Broadcaster();
+	Broadcaster() = default;
+	~Broadcaster() override;
 
-	void register_client(const SPtr<Interface>& client);
-	bool unregister_client(const SPtr<Interface>& client);
+	void register_client(const std::shared_ptr<Interface>& client);
+	bool unregister_client(const std::shared_ptr<Interface>& client);
 
-	void set_broadcast(const SPtr<Interface>& client, bool broadcast);
+	void
+	set_broadcast(const std::shared_ptr<Interface>& client, bool broadcast);
 
 	/** Ignore a client when broadcasting.
 	 *
 	 * This is used to prevent feeding back updates to the client that
 	 * initiated a property set in the first place.
 	 */
-	void set_ignore_client(const SPtr<Interface>& client)
+	void set_ignore_client(const std::shared_ptr<Interface>& client)
 	{
 		_ignore_client = client;
 	}
@@ -75,7 +76,7 @@ public:
 	 * This makes doing the right thing in recursive functions that send
 	 * updates simple (e.g. Event::post_process()).
 	 */
-	class Transfer : public Raul::Noncopyable {
+	class Transfer : public raul::Noncopyable {
 	public:
 		explicit Transfer(Broadcaster& b) : broadcaster(b) {
 			if (++broadcaster._bundle_depth == 1) {
@@ -109,14 +110,14 @@ public:
 private:
 	friend class Transfer;
 
-	using Clients = std::set<SPtr<Interface>>;
+	using Clients = std::set<std::shared_ptr<Interface>>;
 
-	std::mutex                  _clients_mutex;
-	Clients                     _clients;
-	std::set< SPtr<Interface> > _broadcastees;
-	std::atomic<bool>           _must_broadcast;
-	unsigned                    _bundle_depth;
-	SPtr<Interface>             _ignore_client;
+	std::mutex                           _clients_mutex;
+	Clients                              _clients;
+	std::set<std::shared_ptr<Interface>> _broadcastees;
+	std::atomic<bool>                    _must_broadcast{false};
+	unsigned                             _bundle_depth{0};
+	std::shared_ptr<Interface>           _ignore_client;
 };
 
 } // namespace server

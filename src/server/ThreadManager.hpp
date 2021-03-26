@@ -17,8 +17,6 @@
 #ifndef INGEN_ENGINE_THREADMANAGER_HPP
 #define INGEN_ENGINE_THREADMANAGER_HPP
 
-#include "util.hpp"
-
 #include "ingen/ingen.h"
 
 #include <cassert>
@@ -37,13 +35,13 @@ class INGEN_API ThreadManager {
 public:
 	static inline void set_flag(ThreadFlag f) {
 #ifndef NDEBUG
-		flags = ((unsigned)flags | f);
+		flags = (static_cast<unsigned>(flags) | f);
 #endif
 	}
 
 	static inline void unset_flag(ThreadFlag f) {
 #ifndef NDEBUG
-		flags = ((unsigned)flags & (~f));
+		flags = (static_cast<unsigned>(flags) & (~f));
 #endif
 	}
 
@@ -58,8 +56,8 @@ public:
 	/** Set to true during initialisation so ensure_thread doesn't fail.
 	 * Defined in Engine.cpp
 	 */
-	static bool                        single_threaded;
-	static INGEN_THREAD_LOCAL unsigned flags;
+	static bool                  single_threaded;
+	static thread_local unsigned flags;
 };
 
 } // namespace server

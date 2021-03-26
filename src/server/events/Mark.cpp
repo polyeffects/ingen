@@ -16,52 +16,77 @@
 
 #include "events/Mark.hpp"
 
+#include "ingen/Message.hpp"
+#include "ingen/Status.hpp"
+
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
+#include "GraphImpl.hpp"
 #include "PreProcessContext.hpp"
 #include "UndoStack.hpp"
 
+#include <cassert>
+#include <memory>
+#include <unordered_set>
 #include <utility>
 
 namespace ingen {
 namespace server {
 namespace events {
 
-Mark::Mark(Engine&                   engine,
-           const SPtr<Interface>&    client,
-           SampleCount               timestamp,
-           const ingen::BundleBegin& msg)
+Mark::Mark(Engine&                           engine,
+           const std::shared_ptr<Interface>& client,
+           SampleCount                       timestamp,
+           const ingen::BundleBegin&         msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _type(Type::BUNDLE_BEGIN)
-	, _depth(0)
+	, _depth(-1)
 {}
 
-Mark::Mark(Engine&                 engine,
-           const SPtr<Interface>&  client,
-           SampleCount             timestamp,
-           const ingen::BundleEnd& msg)
+Mark::Mark(Engine&                           engine,
+           const std::shared_ptr<Interface>& client,
+           SampleCount                       timestamp,
+           const ingen::BundleEnd&           msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _type(Type::BUNDLE_END)
-	, _depth(0)
+	, _depth(-1)
 {}
 
-bool
-Mark::pre_process(PreProcessContext& ctx)
+Mark::~Mark() = default;
+
+void
+Mark::mark(PreProcessContext&)
 {
-	const UPtr<UndoStack>& stack = ((_mode == Mode::UNDO)
-	                                ? _engine.redo_stack()
-	                                : _engine.undo_stack());
+	const std::unique_ptr<UndoStack>& stack = ((_mode == Mode::UNDO)
+	                                           ? _engine.redo_stack()
+	                                           : _engine.undo_stack());
 
 	switch (_type) {
 	case Type::BUNDLE_BEGIN:
-		ctx.set_in_bundle(true);
 		_depth = stack->start_entry();
 		break;
 	case Type::BUNDLE_END:
 		_depth = stack->finish_entry();
+		break;
+	}
+}
+
+bool
+Mark::pre_process(PreProcessContext& ctx)
+{
+	if (_depth < 0) {
+		mark(ctx);
+	}
+
+	switch (_type) {
+	case Type::BUNDLE_BEGIN:
+		ctx.set_in_bundle(true);
+		break;
+	case Type::BUNDLE_END:
 		ctx.set_in_bundle(false);
 		if (!ctx.dirty_graphs().empty()) {
 			for (GraphImpl* g : ctx.dirty_graphs()) {
-				MPtr<CompiledGraph> cg = compile(*_engine.maid(), *g);
+				auto cg = compile(*_engine.maid(), *g);
 				if (cg) {
 					_compiled_graphs.emplace(g, std::move(cg));
 				}
@@ -91,6 +116,7 @@ Mark::post_process()
 Event::Execution
 Mark::get_execution() const
 {
+	assert(_depth >= 0);
 	if (!_engine.atomic_bundles()) {
 		return Execution::NORMAL;
 	}

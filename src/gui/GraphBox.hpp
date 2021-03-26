@@ -17,47 +17,52 @@
 #ifndef INGEN_GUI_GRAPH_BOX_HPP
 #define INGEN_GUI_GRAPH_BOX_HPP
 
-#include <string>
+#include "ingen/ingen.h"
 
+#include <gdk/gdk.h>
+#include <glibmm/ustring.h>
 #include <gtkmm/alignment.h>
 #include <gtkmm/box.h>
-#include <gtkmm/builder.h>
-#include <gtkmm/menushell.h>
-#include <gtkmm/messagedialog.h>
-#include <gtkmm/paned.h>
 #include <gtkmm/scrolledwindow.h>
-#include <gtkmm/statusbar.h>
+#include <sigc++/connection.h>
 
-#include "ingen/ingen.h"
-#include "ingen/types.hpp"
+#include <memory>
+#include <string>
 
-#include "Window.hpp"
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
 
-namespace Raul {
-class Atom;
+namespace Gtk {
+class Builder;
+class CheckMenuItem;
+class HPaned;
+class Label;
+class MenuItem;
+class Statusbar;
+} // namespace Gtk
+
+namespace raul {
 class Path;
-}
+} // namespace raul
 
 namespace ingen {
 
+class Atom;
 class URI;
 
 namespace client {
 class GraphModel;
 class PortModel;
 class ObjectModel;
-}
+} // namespace client
 
 namespace gui {
 
+class App;
 class BreadCrumbs;
-class LoadGraphBox;
-class LoadPluginWindow;
-class NewSubgraphWindow;
-class GraphDescriptionWindow;
 class GraphView;
 class GraphWindow;
-class SubgraphModule;
 
 /** A window for a graph.
  *
@@ -68,37 +73,39 @@ class INGEN_API GraphBox : public Gtk::VBox
 public:
 	GraphBox(BaseObjectType*                   cobject,
 	         const Glib::RefPtr<Gtk::Builder>& xml);
-	~GraphBox();
 
-	static SPtr<GraphBox> create(
-		App& app, SPtr<const client::GraphModel> graph);
+	~GraphBox() override;
+
+	static std::shared_ptr<GraphBox>
+	create(App& app, const std::shared_ptr<const client::GraphModel>& graph);
 
 	void init_box(App& app);
 
 	void set_status_text(const std::string& text);
 
-	void set_graph(SPtr<const client::GraphModel> graph,
-	               SPtr<GraphView>                view);
+	void set_graph(const std::shared_ptr<const client::GraphModel>& graph,
+	               const std::shared_ptr<GraphView>&                view);
 
 	void set_window(GraphWindow* win) { _window = win; }
 
 	bool documentation_is_visible() { return _doc_scrolledwindow->is_visible(); }
 	void set_documentation(const std::string& doc, bool html);
 
-	SPtr<const client::GraphModel> graph() const { return _graph; }
-	SPtr<GraphView>                view()  const { return _view; }
+	std::shared_ptr<const client::GraphModel> graph() const { return _graph; }
+	std::shared_ptr<GraphView>                view()  const { return _view; }
 
 	void show_port_status(const client::PortModel* port,
 	                      const Atom&              value);
 
-	void set_graph_from_path(const Raul::Path& path, SPtr<GraphView> view);
+	void set_graph_from_path(const raul::Path&                 path,
+	                         const std::shared_ptr<GraphView>& view);
 
 	void object_entered(const client::ObjectModel* model);
 	void object_left(const client::ObjectModel* model);
 
 private:
-	void graph_port_added(SPtr<const client::PortModel> port);
-	void graph_port_removed(SPtr<const client::PortModel> port);
+	void graph_port_added(const std::shared_ptr<const client::PortModel>& port);
+	void graph_port_removed(const std::shared_ptr<const client::PortModel>& port);
 	void property_changed(const URI& predicate, const Atom& value);
 	void show_status(const client::ObjectModel* model);
 
@@ -143,59 +150,59 @@ private:
 	void event_show_engine();
 	void event_clipboard_changed(GdkEventOwnerChange* ev);
 
-	App*                           _app;
-	SPtr<const client::GraphModel> _graph;
-	SPtr<GraphView>                _view;
-	GraphWindow*                   _window;
+	App*                                      _app = nullptr;
+	std::shared_ptr<const client::GraphModel> _graph;
+	std::shared_ptr<GraphView>                _view;
+	GraphWindow*                              _window = nullptr;
 
 	sigc::connection new_port_connection;
 	sigc::connection removed_port_connection;
 	sigc::connection edit_mode_connection;
 
-	Gtk::MenuItem*      _menu_import;
-	Gtk::MenuItem*      _menu_save;
-	Gtk::MenuItem*      _menu_save_as;
-	Gtk::MenuItem*      _menu_export_image;
-	Gtk::MenuItem*      _menu_redo;
-	Gtk::MenuItem*      _menu_undo;
-	Gtk::MenuItem*      _menu_cut;
-	Gtk::MenuItem*      _menu_copy;
-	Gtk::MenuItem*      _menu_paste;
-	Gtk::MenuItem*      _menu_delete;
-	Gtk::MenuItem*      _menu_select_all;
-	Gtk::MenuItem*      _menu_close;
-	Gtk::MenuItem*      _menu_quit;
-	Gtk::CheckMenuItem* _menu_animate_signals;
-	Gtk::CheckMenuItem* _menu_sprung_layout;
-	Gtk::CheckMenuItem* _menu_human_names;
-	Gtk::CheckMenuItem* _menu_show_port_names;
-	Gtk::CheckMenuItem* _menu_show_doc_pane;
-	Gtk::CheckMenuItem* _menu_show_status_bar;
-	Gtk::MenuItem*      _menu_zoom_in;
-	Gtk::MenuItem*      _menu_zoom_out;
-	Gtk::MenuItem*      _menu_zoom_normal;
-	Gtk::MenuItem*      _menu_zoom_full;
-	Gtk::MenuItem*      _menu_increase_font_size;
-	Gtk::MenuItem*      _menu_decrease_font_size;
-	Gtk::MenuItem*      _menu_normal_font_size;
-	Gtk::MenuItem*      _menu_parent;
-	Gtk::MenuItem*      _menu_refresh;
-	Gtk::MenuItem*      _menu_fullscreen;
-	Gtk::MenuItem*      _menu_arrange;
-	Gtk::MenuItem*      _menu_view_engine_window;
-	Gtk::MenuItem*      _menu_view_control_window;
-	Gtk::MenuItem*      _menu_view_graph_properties;
-	Gtk::MenuItem*      _menu_view_messages_window;
-	Gtk::MenuItem*      _menu_view_graph_tree_window;
-	Gtk::MenuItem*      _menu_help_about;
+	Gtk::MenuItem*      _menu_import                 = nullptr;
+	Gtk::MenuItem*      _menu_save                   = nullptr;
+	Gtk::MenuItem*      _menu_save_as                = nullptr;
+	Gtk::MenuItem*      _menu_export_image           = nullptr;
+	Gtk::MenuItem*      _menu_redo                   = nullptr;
+	Gtk::MenuItem*      _menu_undo                   = nullptr;
+	Gtk::MenuItem*      _menu_cut                    = nullptr;
+	Gtk::MenuItem*      _menu_copy                   = nullptr;
+	Gtk::MenuItem*      _menu_paste                  = nullptr;
+	Gtk::MenuItem*      _menu_delete                 = nullptr;
+	Gtk::MenuItem*      _menu_select_all             = nullptr;
+	Gtk::MenuItem*      _menu_close                  = nullptr;
+	Gtk::MenuItem*      _menu_quit                   = nullptr;
+	Gtk::CheckMenuItem* _menu_animate_signals        = nullptr;
+	Gtk::CheckMenuItem* _menu_sprung_layout          = nullptr;
+	Gtk::CheckMenuItem* _menu_human_names            = nullptr;
+	Gtk::CheckMenuItem* _menu_show_port_names        = nullptr;
+	Gtk::CheckMenuItem* _menu_show_doc_pane          = nullptr;
+	Gtk::CheckMenuItem* _menu_show_status_bar        = nullptr;
+	Gtk::MenuItem*      _menu_zoom_in                = nullptr;
+	Gtk::MenuItem*      _menu_zoom_out               = nullptr;
+	Gtk::MenuItem*      _menu_zoom_normal            = nullptr;
+	Gtk::MenuItem*      _menu_zoom_full              = nullptr;
+	Gtk::MenuItem*      _menu_increase_font_size     = nullptr;
+	Gtk::MenuItem*      _menu_decrease_font_size     = nullptr;
+	Gtk::MenuItem*      _menu_normal_font_size       = nullptr;
+	Gtk::MenuItem*      _menu_parent                 = nullptr;
+	Gtk::MenuItem*      _menu_refresh                = nullptr;
+	Gtk::MenuItem*      _menu_fullscreen             = nullptr;
+	Gtk::MenuItem*      _menu_arrange                = nullptr;
+	Gtk::MenuItem*      _menu_view_engine_window     = nullptr;
+	Gtk::MenuItem*      _menu_view_control_window    = nullptr;
+	Gtk::MenuItem*      _menu_view_graph_properties  = nullptr;
+	Gtk::MenuItem*      _menu_view_messages_window   = nullptr;
+	Gtk::MenuItem*      _menu_view_graph_tree_window = nullptr;
+	Gtk::MenuItem*      _menu_help_about             = nullptr;
 
-	Gtk::Alignment*     _alignment;
-	BreadCrumbs*        _breadcrumbs;
-	Gtk::Statusbar*     _status_bar;
-	Gtk::Label*         _status_label;
+	Gtk::Alignment* _alignment    = nullptr;
+	BreadCrumbs*    _breadcrumbs  = nullptr;
+	Gtk::Statusbar* _status_bar   = nullptr;
+	Gtk::Label*     _status_label = nullptr;
 
-	Gtk::HPaned*         _doc_paned;
-	Gtk::ScrolledWindow* _doc_scrolledwindow;
+	Gtk::HPaned*         _doc_paned          = nullptr;
+	Gtk::ScrolledWindow* _doc_scrolledwindow = nullptr;
 
 	sigc::connection _entered_connection;
 	sigc::connection _left_connection;
@@ -203,8 +210,8 @@ private:
 	/** Invisible bin used to store breadcrumbs when not shown by a view */
 	Gtk::Alignment _breadcrumb_bin;
 
-	bool _has_shown_documentation;
-	bool _enable_signal;
+	bool _has_shown_documentation = false;
+	bool _enable_signal           = true;
 };
 
 } // namespace gui

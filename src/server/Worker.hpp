@@ -18,17 +18,20 @@
 #define INGEN_ENGINE_WORKER_HPP
 
 #include "ingen/LV2Features.hpp"
-#include "ingen/types.hpp"
+#include "lv2/core/lv2.h"
 #include "lv2/worker/worker.h"
 #include "raul/RingBuffer.hpp"
 #include "raul/Semaphore.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <thread>
 
 namespace ingen {
 
 class Log;
+class Node;
+class World;
 
 namespace server {
 
@@ -45,7 +48,7 @@ public:
 
 		const char* uri() const override { return LV2_WORKER__schedule; }
 
-		SPtr<LV2_Feature> feature(World& world, Node* n) override;
+		std::shared_ptr<LV2_Feature> feature(World& world, Node* n) override;
 
 		const bool synchronous;
 	};
@@ -54,20 +57,20 @@ public:
 	                          uint32_t    size,
 	                          const void* data);
 
-	SPtr<Schedule> schedule_feature() { return _schedule; }
+	std::shared_ptr<Schedule> schedule_feature() { return _schedule; }
 
 private:
-	SPtr<Schedule> _schedule;
+	std::shared_ptr<Schedule> _schedule;
 
-	Log&              _log;
-	Raul::Semaphore   _sem;
-	Raul::RingBuffer  _requests;
-	Raul::RingBuffer  _responses;
-	uint8_t* const    _buffer;
-	const uint32_t    _buffer_size;
-	UPtr<std::thread> _thread;
-	bool              _exit_flag;
-	bool              _synchronous;
+	Log&                         _log;
+	raul::Semaphore              _sem;
+	raul::RingBuffer             _requests;
+	raul::RingBuffer             _responses;
+	uint8_t* const               _buffer;
+	const uint32_t               _buffer_size;
+	std::unique_ptr<std::thread> _thread;
+	bool                         _exit_flag;
+	bool                         _synchronous;
 
 	void run();
 };

@@ -36,33 +36,33 @@
 
 namespace ingen {
 
-URIs::Quark::Quark(Forge&      forge,
+URIs::Quark::Quark(Forge&      ingen_forge,
                    URIMap*,
                    LilvWorld*  lworld,
                    const char* str)
 	: URI(str)
-	, urid(forge.make_urid(URI(str)))
-	, uri(forge.alloc_uri(str))
-	, lnode(lilv_new_uri(lworld, str))
+	, _urid_atom(ingen_forge.make_urid(URI(str)))
+	, _uri_atom(ingen_forge.alloc_uri(str))
+	, _lilv_node(lilv_new_uri(lworld, str))
 {}
 
 URIs::Quark::Quark(const Quark& copy)
 	: URI(copy)
-	, urid(copy.urid)
-	, uri(copy.uri)
-	, lnode(lilv_node_duplicate(copy.lnode))
+	, _urid_atom(copy._urid_atom)
+	, _uri_atom(copy._uri_atom)
+	, _lilv_node(lilv_node_duplicate(copy._lilv_node))
 {}
 
 URIs::Quark::~Quark()
 {
-	lilv_node_free(lnode);
+	lilv_node_free(_lilv_node);
 }
 
 #define NS_RDF   "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define NS_RDFS  "http://www.w3.org/2000/01/rdf-schema#"
 
-URIs::URIs(Forge& forge, URIMap* map, LilvWorld* lworld)
-	: forge(forge)
+URIs::URIs(Forge& ingen_forge, URIMap* map, LilvWorld* lworld)
+	: forge(ingen_forge)
 	, atom_AtomPort         (forge, map, lworld, LV2_ATOM__AtomPort)
 	, atom_Bool             (forge, map, lworld, LV2_ATOM__Bool)
 	, atom_Chunk            (forge, map, lworld, LV2_ATOM__Chunk)

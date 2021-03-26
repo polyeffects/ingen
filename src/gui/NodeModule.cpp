@@ -17,45 +17,69 @@
 #include "NodeModule.hpp"
 
 #include "App.hpp"
+#include "GraphBox.hpp"
 #include "GraphCanvas.hpp"
 #include "GraphWindow.hpp"
 #include "NodeMenu.hpp"
 #include "Port.hpp"
-#include "RenameWindow.hpp"
-#include "Style.hpp"
 #include "SubgraphModule.hpp"
 #include "WidgetFactory.hpp"
 #include "WindowFactory.hpp"
-#include "ingen_config.h"
 
+#include "ganv/Port.hpp"
 #include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
 #include "ingen/client/BlockModel.hpp"
-#include "ingen/client/GraphModel.hpp"
+#include "ingen/client/GraphModel.hpp" // IWYU pragma: keep
 #include "ingen/client/PluginModel.hpp"
 #include "ingen/client/PluginUI.hpp"
+#include "ingen/client/PortModel.hpp"
 #include "lv2/atom/util.h"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
+#include <glibmm/main.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/container.h>
 #include <gtkmm/eventbox.h>
+#include <gtkmm/widget.h>
+#include <gtkmm/window.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/adaptors/retype_return.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
 
 #include <cassert>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace ingen {
 
-using namespace client;
+using client::BlockModel;
+using client::GraphModel;
+using client::PluginModel;
+using client::PortModel;
 
 namespace gui {
 
-NodeModule::NodeModule(GraphCanvas&           canvas,
-                       SPtr<const BlockModel> block)
-	: Ganv::Module(canvas, block->path().symbol(), 0, 0, true)
-	, _block(block)
-	, _gui_widget(nullptr)
-	, _gui_window(nullptr)
-	, _initialised(false)
+NodeModule::NodeModule(GraphCanvas&                             canvas,
+                       const std::shared_ptr<const BlockModel>& block)
+    : Ganv::Module(canvas, block->path().symbol(), 0, 0, true)
+    , _block(block)
+    , _gui_widget(nullptr)
+    , _gui_window(nullptr)
+    , _initialised(false)
 {
 	block->signal_new_port().connect(
 		sigc::mem_fun(this, &NodeModule::new_port_view));
@@ -75,7 +99,7 @@ NodeModule::NodeModule(GraphCanvas&           canvas,
 	signal_selected().connect(
 		sigc::mem_fun(this, &NodeModule::on_selected));
 
-	const PluginModel* plugin = dynamic_cast<const PluginModel*>(block->plugin());
+	const auto* plugin = dynamic_cast<const PluginModel*>(block->plugin());
 	if (plugin) {
 		plugin->signal_changed().connect(
 			sigc::mem_fun(this, &NodeModule::plugin_changed));
@@ -104,7 +128,7 @@ NodeModule::~NodeModule()
 bool
 NodeModule::idle_init()
 {
-	if (_block->ports().size() == 0) {
+	if (_block->ports().empty()) {
 		return true;  // Need to embed GUI, but ports haven't shown up yet
 	}
 
@@ -133,11 +157,11 @@ NodeModule::show_menu(GdkEventButton* ev)
 }
 
 NodeModule*
-NodeModule::create(GraphCanvas&           canvas,
-                   SPtr<const BlockModel> block,
-                   bool                   human)
+NodeModule::create(GraphCanvas&                             canvas,
+                   const std::shared_ptr<const BlockModel>& block,
+                   bool                                     human)
 {
-	SPtr<const GraphModel> graph = dynamic_ptr_cast<const GraphModel>(block);
+	auto graph = std::dynamic_pointer_cast<const GraphModel>(block);
 
 	NodeModule* ret = (graph)
 		? new SubgraphModule(canvas, graph)
@@ -163,7 +187,7 @@ NodeModule::create(GraphCanvas&           canvas,
 App&
 NodeModule::app() const
 {
-	return ((GraphCanvas*)canvas())->app();
+	return static_cast<GraphCanvas*>(canvas())->app();
 }
 
 void
@@ -177,8 +201,8 @@ NodeModule::show_human_names(bool b)
 		set_label(block()->symbol().c_str());
 	}
 
-	for (iterator i = begin(); i != end(); ++i) {
-		ingen::gui::Port* const port = dynamic_cast<ingen::gui::Port*>(*i);
+	for (auto* p : *this) {
+		auto* const port = dynamic_cast<ingen::gui::Port*>(p);
 		Glib::ustring label(port->model()->symbol().c_str());
 		if (b) {
 			const Atom& name_property = port->model()->get_property(uris.lv2_name);
@@ -192,7 +216,7 @@ NodeModule::show_human_names(bool b)
 				}
 			}
 		}
-		(*i)->set_label(label.c_str());
+		port->set_label(label.c_str());
 	}
 }
 
@@ -234,8 +258,8 @@ NodeModule::port_value_changed(uint32_t index, const Atom& value)
 void
 NodeModule::plugin_changed()
 {
-	for (iterator p = begin(); p != end(); ++p) {
-		dynamic_cast<ingen::gui::Port*>(*p)->update_metadata();
+	for (auto* p : *this) {
+		dynamic_cast<ingen::gui::Port*>(p)->update_metadata();
 	}
 }
 
@@ -268,7 +292,9 @@ NodeModule::embed_gui(bool embed)
 			if (!_plugin_ui->instantiate()) {
 				app().log().error("Failed to instantiate LV2 UI\n");
 			} else {
-				GtkWidget* c_widget = (GtkWidget*)_plugin_ui->get_widget();
+				auto* c_widget =
+				    static_cast<GtkWidget*>(_plugin_ui->get_widget());
+
 				_gui_widget = Glib::wrap(c_widget);
 
 				Gtk::Container* container = new Gtk::EventBox();
@@ -302,7 +328,7 @@ NodeModule::rename()
 }
 
 void
-NodeModule::new_port_view(SPtr<const PortModel> port)
+NodeModule::new_port_view(const std::shared_ptr<const PortModel>& port)
 {
 	Port::create(app(), *this, port);
 
@@ -316,10 +342,10 @@ NodeModule::new_port_view(SPtr<const PortModel> port)
 }
 
 Port*
-NodeModule::port(SPtr<const PortModel> model)
+NodeModule::port(const std::shared_ptr<const PortModel>& model)
 {
-	for (iterator p = begin(); p != end(); ++p) {
-		Port* const port = dynamic_cast<Port*>(*p);
+	for (auto* p : *this) {
+		auto* const port = dynamic_cast<Port*>(p);
 		if (port->model() == model) {
 			return port;
 		}
@@ -328,15 +354,16 @@ NodeModule::port(SPtr<const PortModel> model)
 }
 
 void
-NodeModule::delete_port_view(SPtr<const PortModel> model)
+NodeModule::delete_port_view(const std::shared_ptr<const PortModel>& model)
 {
-	Port* p = port(model);
-	if (p) {
-		delete p;
-	} else {
+	Port* const p = port(model);
+
+	if (!p) {
 		app().log().warn("Failed to find port %1% on module %2%\n",
 		                 model->path(), _block->path());
 	}
+
+	delete p;
 }
 
 bool
@@ -348,7 +375,9 @@ NodeModule::popup_gui()
 			return true;
 		}
 
-		const PluginModel* const plugin = dynamic_cast<const PluginModel*>(_block->plugin());
+		const auto* const plugin =
+		    dynamic_cast<const PluginModel*>(_block->plugin());
+
 		assert(plugin);
 
 		_plugin_ui = plugin->ui(app().world(), _block);
@@ -362,7 +391,8 @@ NodeModule::popup_gui()
 				return false;
 			}
 
-			GtkWidget* c_widget = (GtkWidget*)_plugin_ui->get_widget();
+			auto* c_widget = static_cast<GtkWidget*>(_plugin_ui->get_widget());
+
 			_gui_widget = Glib::wrap(c_widget);
 
 			_gui_window = new Gtk::Window();
@@ -425,13 +455,13 @@ NodeModule::on_event(GdkEvent* ev)
 		return on_double_click(&ev->button);
 	} else if (ev->type == GDK_ENTER_NOTIFY) {
 		GraphBox* const box = app().window_factory()->graph_box(
-			dynamic_ptr_cast<const GraphModel>(_block->parent()));
+			std::dynamic_pointer_cast<const GraphModel>(_block->parent()));
 		if (box) {
 			box->object_entered(_block.get());
 		}
 	} else if (ev->type == GDK_LEAVE_NOTIFY) {
 		GraphBox* const box = app().window_factory()->graph_box(
-			dynamic_ptr_cast<const GraphModel>(_block->parent()));
+			std::dynamic_pointer_cast<const GraphModel>(_block->parent()));
 		if (box) {
 			box->object_left(_block.get());
 		}
@@ -462,9 +492,9 @@ NodeModule::property_changed(const URI& key, const Atom& value)
 	const URIs& uris = app().uris();
 	if (value.type() == uris.forge.Float) {
 		if (key == uris.ingen_canvasX) {
-			move_to(value.get<float>(), get_y());
+			move_to(static_cast<double>(value.get<float>()), get_y());
 		} else if (key == uris.ingen_canvasY) {
-			move_to(get_x(), value.get<float>());
+			move_to(get_x(), static_cast<double>(value.get<float>()));
 		}
 	} else if (value.type() == uris.forge.Bool) {
 		if (key == uris.ingen_polyphonic) {
@@ -499,7 +529,6 @@ NodeModule::on_selected(gboolean selected)
 	}
 
 	if (selected && win->documentation_is_visible()) {
-		GraphWindow* win = app().window_factory()->parent_graph_window(block());
 		std::string doc;
 		bool html = false;
 #ifdef HAVE_WEBKIT

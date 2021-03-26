@@ -18,16 +18,26 @@
 
 #include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "PreProcessContext.hpp"
 
+#include "ingen/Interface.hpp"
 #include "ingen/Parser.hpp"
 #include "ingen/Serialiser.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/World.hpp"
+#include "ingen/paths.hpp"
 #include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
+#include <boost/optional/optional.hpp>
+
+#include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -36,16 +46,18 @@ namespace ingen {
 namespace server {
 namespace events {
 
-Copy::Copy(Engine&                engine,
-           const SPtr<Interface>& client,
-           SampleCount            timestamp,
-           const ingen::Copy&     msg)
-	: Event(engine, client, msg.seq, timestamp)
-	, _msg(msg)
-	, _old_block(nullptr)
-	, _parent(nullptr)
-	, _block(nullptr)
+Copy::Copy(Engine&                           engine,
+           const std::shared_ptr<Interface>& client,
+           SampleCount                       timestamp,
+           const ingen::Copy&                msg)
+    : Event(engine, client, msg.seq, timestamp)
+    , _msg(msg)
+    , _old_block(nullptr)
+    , _parent(nullptr)
+    , _block(nullptr)
 {}
+
+Copy::~Copy() = default;
 
 bool
 Copy::pre_process(PreProcessContext& ctx)
@@ -54,7 +66,7 @@ Copy::pre_process(PreProcessContext& ctx)
 
 	if (uri_is_path(_msg.old_uri)) {
 		// Old URI is a path within the engine
-		const Raul::Path old_path = uri_to_path(_msg.old_uri);
+		const raul::Path old_path = uri_to_path(_msg.old_uri);
 
 		// Find the old node
 		const Store::iterator i = _engine.store()->find(old_path);
@@ -63,7 +75,7 @@ Copy::pre_process(PreProcessContext& ctx)
 		}
 
 		// Ensure it is a block (ports are not supported for now)
-		if (!(_old_block = dynamic_ptr_cast<BlockImpl>(i->second))) {
+		if (!(_old_block = std::dynamic_pointer_cast<BlockImpl>(i->second))) {
 			return Event::pre_process_done(Status::BAD_OBJECT_TYPE, old_path);
 		}
 
@@ -92,8 +104,8 @@ bool
 Copy::engine_to_engine(PreProcessContext& ctx)
 {
 	// Only support a single source for now
-	const Raul::Path new_path = uri_to_path(_msg.new_uri);
-	if (!Raul::Symbol::is_valid(new_path.symbol())) {
+	const raul::Path new_path = uri_to_path(_msg.new_uri);
+	if (!raul::Symbol::is_valid(new_path.symbol())) {
 		return Event::pre_process_done(Status::BAD_REQUEST);
 	}
 
@@ -103,7 +115,7 @@ Copy::engine_to_engine(PreProcessContext& ctx)
 	}
 
 	// Find new parent graph
-	const Raul::Path      parent_path = new_path.parent();
+	const raul::Path      parent_path = new_path.parent();
 	const Store::iterator p           = _engine.store()->find(parent_path);
 	if (p == _engine.store()->end()) {
 		return Event::pre_process_done(Status::NOT_FOUND, parent_path);
@@ -114,7 +126,7 @@ Copy::engine_to_engine(PreProcessContext& ctx)
 
 	// Create new block
 	if (!(_block = dynamic_cast<BlockImpl*>(
-		      _old_block->duplicate(_engine, Raul::Symbol(new_path.symbol()), _parent)))) {
+		      _old_block->duplicate(_engine, raul::Symbol(new_path.symbol()), _parent)))) {
 		return Event::pre_process_done(Status::INTERNAL_ERROR);
 	}
 
@@ -143,7 +155,7 @@ bool
 Copy::engine_to_filesystem(PreProcessContext&)
 {
 	// Ensure source is a graph
-	SPtr<GraphImpl> graph = dynamic_ptr_cast<GraphImpl>(_old_block);
+	auto graph = std::dynamic_pointer_cast<GraphImpl>(_old_block);
 	if (!graph) {
 		return Event::pre_process_done(Status::BAD_OBJECT_TYPE, _msg.old_uri);
 	}
@@ -177,12 +189,12 @@ Copy::filesystem_to_engine(PreProcessContext&)
 
 	// Old URI is a filesystem path and new URI is a path within the engine
 	const std::string             src_path(_msg.old_uri.path());
-	const Raul::Path              dst_path = uri_to_path(_msg.new_uri);
-	boost::optional<Raul::Path>   dst_parent;
-	boost::optional<Raul::Symbol> dst_symbol;
+	const raul::Path              dst_path = uri_to_path(_msg.new_uri);
+	boost::optional<raul::Path>   dst_parent;
+	boost::optional<raul::Symbol> dst_symbol;
 	if (!dst_path.is_root()) {
 		dst_parent = dst_path.parent();
-		dst_symbol = Raul::Symbol(dst_path.symbol());
+		dst_symbol = raul::Symbol(dst_path.symbol());
 	}
 
 	_engine.world().parser()->parse_file(

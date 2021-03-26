@@ -20,25 +20,30 @@
 #include "EventWriter.hpp"
 
 #include "ingen/AtomReader.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/Message.hpp"
+#include "ingen/Status.hpp"
+#include "lv2/atom/atom.h"
 
 #include <deque>
+#include <memory>
 
 namespace ingen {
 namespace server {
 namespace events {
 
-Undo::Undo(Engine&                engine,
-           const SPtr<Interface>& client,
-           SampleCount            timestamp,
-           const ingen::Undo&     msg)
+Undo::Undo(Engine&                           engine,
+           const std::shared_ptr<Interface>& client,
+           SampleCount                       timestamp,
+           const ingen::Undo&                msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _is_redo(false)
 {}
 
-Undo::Undo(Engine&                engine,
-           const SPtr<Interface>& client,
-           SampleCount            timestamp,
-           const ingen::Redo&     msg)
+Undo::Undo(Engine&                           engine,
+           const std::shared_ptr<Interface>& client,
+           SampleCount                       timestamp,
+           const ingen::Redo&                msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _is_redo(true)
 {}
@@ -46,8 +51,10 @@ Undo::Undo(Engine&                engine,
 bool
 Undo::pre_process(PreProcessContext&)
 {
-	const UPtr<UndoStack>& stack = _is_redo ? _engine.redo_stack() : _engine.undo_stack();
-	const Event::Mode      mode  = _is_redo ? Event::Mode::REDO    : Event::Mode::UNDO;
+	const std::unique_ptr<UndoStack>& stack =
+	    _is_redo ? _engine.redo_stack() : _engine.undo_stack();
+
+	const Event::Mode mode = _is_redo ? Event::Mode::REDO : Event::Mode::UNDO;
 
 	if (stack->empty()) {
 		return Event::pre_process_done(Status::NOT_FOUND);
@@ -73,7 +80,7 @@ Undo::pre_process(PreProcessContext&)
 }
 
 void
-Undo::execute(RunContext& context)
+Undo::execute(RunContext&)
 {
 }
 

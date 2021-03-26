@@ -19,26 +19,44 @@
 
 #include "Window.hpp"
 
-#include "ingen/Node.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/client/ClientStore.hpp"
-#include "ingen/types.hpp"
-#include "ingen_config.h"
 
-#include <gtkmm/builder.h>
-#include <gtkmm/combobox.h>
+#include <gdk/gdk.h>
+#include <glibmm/refptr.h>
+#include <gtkmm/entry.h>
 #include <gtkmm/liststore.h>
 #include <gtkmm/treemodel.h>
-#include <gtkmm/treeview.h>
+#include <gtkmm/treemodelcolumn.h>
+#include <gtkmm/treeselection.h>
+#include <gtkmm/window.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
+namespace Glib {
+class ustring;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+class Button;
+class CheckButton;
+class ComboBox;
+class TreeView;
+class TreeViewColumn;
+} // namespace Gtk
+
 namespace ingen {
+
+class Atom;
 
 namespace client {
 class GraphModel;
 class PluginModel;
-}
+} // namespace client
 
 namespace gui {
 
@@ -54,13 +72,15 @@ public:
 	LoadPluginWindow(BaseObjectType*                   cobject,
 	                 const Glib::RefPtr<Gtk::Builder>& xml);
 
-	void set_graph(SPtr<const client::GraphModel> graph);
-	void set_plugins(SPtr<const client::ClientStore::Plugins> plugins);
+	void set_graph(const std::shared_ptr<const client::GraphModel>& graph);
 
-	void add_plugin(SPtr<const client::PluginModel> plugin);
+	void set_plugins(
+	    const std::shared_ptr<const client::ClientStore::Plugins>& plugins);
 
-	void present(SPtr<const client::GraphModel> graph,
-	             Properties                     data);
+	void add_plugin(const std::shared_ptr<const client::PluginModel>& plugin);
+
+	void present(const std::shared_ptr<const client::GraphModel>& graph,
+	             const Properties&                                data);
 
 protected:
 	void on_show() override;
@@ -86,7 +106,7 @@ private:
 		Gtk::TreeModelColumn<Glib::ustring> _col_uri;
 
 		// Not displayed:
-		Gtk::TreeModelColumn< SPtr<const client::PluginModel> > _col_plugin;
+		Gtk::TreeModelColumn<std::shared_ptr<const client::PluginModel>> _col_plugin;
 	};
 
 	/** Column for the filter criteria combo box. */
@@ -109,10 +129,10 @@ private:
 	void name_changed();
 	void name_cleared(Gtk::EntryIconPosition pos, const GdkEventButton* event);
 
-	void set_row(Gtk::TreeModel::Row&            row,
-	             SPtr<const client::PluginModel> plugin);
+	void set_row(Gtk::TreeModel::Row&                              row,
+	             const std::shared_ptr<const client::PluginModel>& plugin);
 
-	void new_plugin(SPtr<const client::PluginModel> pm);
+	void new_plugin(const std::shared_ptr<const client::PluginModel>& pm);
 
 	void plugin_property_changed(const URI&  plugin,
 	                             const URI&  predicate,
@@ -121,14 +141,15 @@ private:
 	void plugin_activated(const Gtk::TreeModel::Path& path, Gtk::TreeViewColumn* col);
 	void plugin_selection_changed();
 
-	std::string generate_module_name(SPtr<const client::PluginModel> plugin,
-	                                 int                             offset=0);
+	static std::string generate_module_name(
+	    const std::shared_ptr<const client::PluginModel>& plugin,
+	    int                                               offset = 0);
 
 	void load_plugin(const Gtk::TreeModel::iterator& iter);
 
 	Properties _initial_data;
 
-	SPtr<const client::GraphModel> _graph;
+	std::shared_ptr<const client::GraphModel> _graph;
 
 	using Rows = std::map<URI, Gtk::TreeModel::iterator>;
 	Rows _rows;
@@ -141,17 +162,17 @@ private:
 
 	Glib::RefPtr<Gtk::TreeSelection> _selection;
 
-	int _name_offset; // see comments for generate_plugin_name
+	int _name_offset = 0; // see comments for generate_plugin_name
 
-	bool              _has_shown;
-	bool              _refresh_list;
-	Gtk::TreeView*    _plugins_treeview;
-	Gtk::CheckButton* _polyphonic_checkbutton;
-	Gtk::Entry*       _name_entry;
-	Gtk::Button*      _close_button;
-	Gtk::Button*      _add_button;
-	Gtk::ComboBox*    _filter_combo;
-	Gtk::Entry*       _search_entry;
+	bool              _has_shown              = false;
+	bool              _refresh_list           = true;
+	Gtk::TreeView*    _plugins_treeview       = nullptr;
+	Gtk::CheckButton* _polyphonic_checkbutton = nullptr;
+	Gtk::Entry*       _name_entry             = nullptr;
+	Gtk::Button*      _close_button           = nullptr;
+	Gtk::Button*      _add_button             = nullptr;
+	Gtk::ComboBox*    _filter_combo           = nullptr;
+	Gtk::Entry*       _search_entry           = nullptr;
 };
 
 } // namespace gui

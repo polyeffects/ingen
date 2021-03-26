@@ -17,10 +17,15 @@
 #include "BreadCrumbs.hpp"
 
 #include "App.hpp"
+#include "GraphView.hpp"
 
 #include "ingen/client/SigClientInterface.hpp"
+#include "raul/Symbol.hpp"
 
 #include <boost/variant/get.hpp>
+#include <glibmm/signalproxy.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <string>
 
@@ -30,8 +35,7 @@ namespace gui {
 using std::string;
 
 BreadCrumbs::BreadCrumbs(App& app)
-	: Gtk::HBox()
-	, _active_path("/")
+	: _active_path("/")
 	, _full_path("/")
 	, _enable_signal(true)
 {
@@ -41,8 +45,8 @@ BreadCrumbs::BreadCrumbs(App& app)
 	set_can_focus(false);
 }
 
-SPtr<GraphView>
-BreadCrumbs::view(const Raul::Path& path)
+std::shared_ptr<GraphView>
+BreadCrumbs::view(const raul::Path& path)
 {
 	for (const auto& b : _breadcrumbs) {
 		if (b->path() == path) {
@@ -50,7 +54,7 @@ BreadCrumbs::view(const Raul::Path& path)
 		}
 	}
 
-	return SPtr<GraphView>();
+	return nullptr;
 }
 
 /** Sets up the crumbs to display `path`.
@@ -59,7 +63,8 @@ BreadCrumbs::view(const Raul::Path& path)
  * children preserved.
  */
 void
-BreadCrumbs::build(Raul::Path path, SPtr<GraphView> view)
+BreadCrumbs::build(const raul::Path&                 path,
+                   const std::shared_ptr<GraphView>& view)
 {
 	bool old_enable_signal = _enable_signal;
 	_enable_signal = false;
@@ -92,16 +97,16 @@ BreadCrumbs::build(Raul::Path path, SPtr<GraphView> view)
 			if (suffix[0] == '/') {
 				suffix = suffix.substr(1);
 			}
-			const string name = suffix.substr(0, suffix.find("/"));
-			_full_path = _full_path.child(Raul::Symbol(name));
+			const string name = suffix.substr(0, suffix.find('/'));
+			_full_path = _full_path.child(raul::Symbol(name));
 			BreadCrumb* but = create_crumb(_full_path, view);
 			pack_start(*but, false, false, 1);
 			_breadcrumbs.push_back(but);
 			but->show();
-			if (suffix.find("/") == string::npos) {
+			if (suffix.find('/') == string::npos) {
 				break;
 			} else {
-				suffix = suffix.substr(suffix.find("/")+1);
+				suffix = suffix.substr(suffix.find('/') + 1);
 			}
 		}
 
@@ -124,28 +129,28 @@ BreadCrumbs::build(Raul::Path path, SPtr<GraphView> view)
 		_breadcrumbs.clear();
 
 		// Add root
-		BreadCrumb* root_but = create_crumb(Raul::Path("/"), view);
+		BreadCrumb* root_but = create_crumb(raul::Path("/"), view);
 		pack_start(*root_but, false, false, 1);
 		_breadcrumbs.push_front(root_but);
 		root_but->set_active(root_but->path() == _active_path);
 
-		Raul::Path working_path("/");
+		raul::Path working_path("/");
 		string suffix = path.substr(1);
 		while (suffix.length() > 0) {
 			if (suffix[0] == '/') {
 				suffix = suffix.substr(1);
 			}
-			const string name = suffix.substr(0, suffix.find("/"));
-			working_path = working_path.child(Raul::Symbol(name));
+			const string name = suffix.substr(0, suffix.find('/'));
+			working_path = working_path.child(raul::Symbol(name));
 			BreadCrumb* but = create_crumb(working_path, view);
 			pack_start(*but, false, false, 1);
 			_breadcrumbs.push_back(but);
 			but->set_active(working_path == _active_path);
 			but->show();
-			if (suffix.find("/") == string::npos) {
+			if (suffix.find('/') == string::npos) {
 				break;
 			} else {
-				suffix = suffix.substr(suffix.find("/")+1);
+				suffix = suffix.substr(suffix.find('/')+1);
 			}
 		}
 	}
@@ -157,13 +162,11 @@ BreadCrumbs::build(Raul::Path path, SPtr<GraphView> view)
  * match, otherwise ignoring `view`.
  */
 BreadCrumbs::BreadCrumb*
-BreadCrumbs::create_crumb(const Raul::Path& path,
-                          SPtr<GraphView>   view)
+BreadCrumbs::create_crumb(const raul::Path&                 path,
+                          const std::shared_ptr<GraphView>& view)
 {
-	BreadCrumb* but = manage(
-		new BreadCrumb(path,
-		               ((view && path == view->graph()->path())
-		                ? view : SPtr<GraphView>())));
+	BreadCrumb* but = manage(new BreadCrumb(
+	    path, ((view && path == view->graph()->path()) ? view : nullptr)));
 
 	but->signal_toggled().connect(
 		sigc::bind(sigc::mem_fun(this, &BreadCrumbs::breadcrumb_clicked),
@@ -216,7 +219,7 @@ BreadCrumbs::object_destroyed(const URI& uri)
 }
 
 void
-BreadCrumbs::object_moved(const Raul::Path& old_path, const Raul::Path& new_path)
+BreadCrumbs::object_moved(const raul::Path& old_path, const raul::Path& new_path)
 {
 	for (const auto& b : _breadcrumbs) {
 		if (b->path() == old_path) {

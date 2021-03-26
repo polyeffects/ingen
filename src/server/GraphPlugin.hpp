@@ -19,12 +19,20 @@
 
 #include "PluginImpl.hpp"
 
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
+#include "lilv/lilv.h"
+#include "raul/Symbol.hpp"
+
 #include <string>
 
 namespace ingen {
 namespace server {
 
 class BlockImpl;
+class BufferFactory;
+class Engine;
+class GraphImpl;
 
 /** Implementation of a Graph plugin.
  *
@@ -35,13 +43,13 @@ class GraphPlugin : public PluginImpl
 public:
 	GraphPlugin(URIs&               uris,
 	            const URI&          uri,
-	            const Raul::Symbol& symbol,
+	            const raul::Symbol& symbol,
 	            const std::string&  name)
-		: PluginImpl(uris, uris.ingen_Graph.urid, uri)
+		: PluginImpl(uris, uris.ingen_Graph.urid_atom(), uri)
 	{}
 
 	BlockImpl* instantiate(BufferFactory&      bufs,
-	                       const Raul::Symbol& symbol,
+	                       const raul::Symbol& symbol,
 	                       bool                polyphonic,
 	                       GraphImpl*          parent,
 	                       Engine&             engine,
@@ -50,8 +58,8 @@ public:
 		return nullptr;
 	}
 
-	Raul::Symbol symbol() const override { return Raul::Symbol("graph"); }
-	std::string  name()   const          { return "Ingen Graph"; }
+	raul::Symbol       symbol() const override { return raul::Symbol("graph"); }
+	static std::string name() { return "Ingen Graph"; }
 
 private:
 	const std::string _symbol;

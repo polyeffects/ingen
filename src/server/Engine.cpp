@@ -19,6 +19,7 @@
 #include "BlockFactory.hpp"
 #include "Broadcaster.hpp"
 #include "BufferFactory.hpp"
+#include "BufferRef.hpp"
 #include "ControlBindings.hpp"
 #include "DirectDriver.hpp"
 #include "Driver.hpp"
@@ -26,9 +27,12 @@
 #include "EventWriter.hpp"
 #include "GraphImpl.hpp"
 #include "LV2Options.hpp"
+#include "NodeImpl.hpp"
+#include "PortImpl.hpp"
 #include "PostProcessor.hpp"
 #include "PreProcessor.hpp"
 #include "RunContext.hpp"
+#include "Task.hpp"
 #include "ThreadManager.hpp"
 #include "UndoStack.hpp"
 #include "Worker.hpp"
@@ -39,39 +43,49 @@
 #include "SocketListener.hpp"
 #endif
 
+#include "ingen/Atom.hpp"
 #include "ingen/AtomReader.hpp"
+#include "ingen/ColorContext.hpp"
 #include "ingen/Configuration.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/LV2Features.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Resource.hpp"
 #include "ingen/Store.hpp"
 #include "ingen/StreamWriter.hpp"
 #include "ingen/Tee.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
-#include "ingen/types.hpp"
+#include "ingen/memory.hpp"
 #include "lv2/buf-size/buf-size.h"
 #include "lv2/state/state.h"
 #include "raul/Maid.hpp"
+#include "raul/Path.hpp"
+#include "raul/RingBuffer.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <map>
+#include <memory>
 #include <thread>
 #include <utility>
 
 namespace ingen {
 namespace server {
 
-INGEN_THREAD_LOCAL unsigned ThreadManager::flags(0);
-bool               ThreadManager::single_threaded(true);
+thread_local unsigned ThreadManager::flags(0);
+bool                  ThreadManager::single_threaded(true);
 
 Engine::Engine(ingen::World& world)
 	: _world(world)
 	, _options(new LV2Options(world.uris()))
 	, _buffer_factory(new BufferFactory(*this, world.uris()))
-	, _maid(new Raul::Maid)
+	, _maid(new raul::Maid)
 	, _worker(new Worker(world.log(), event_queue_size()))
 	, _sync_worker(new Worker(world.log(), event_queue_size(), true))
 	, _broadcaster(new Broadcaster())
@@ -100,7 +114,7 @@ Engine::Engine(ingen::World& world)
 
 	for (int i = 0; i < world.conf().option("threads").get<int32_t>(); ++i) {
 		_notifications.emplace_back(
-			make_unique<Raul::RingBuffer>(uint32_t(24 * event_queue_size())));
+			make_unique<raul::RingBuffer>(uint32_t(24 * event_queue_size())));
 		_run_contexts.emplace_back(
 			make_unique<RunContext>(
 				*this, _notifications.back().get(), unsigned(i), i > 0));
@@ -109,17 +123,17 @@ Engine::Engine(ingen::World& world)
 	_world.lv2_features().add_feature(_worker->schedule_feature());
 	_world.lv2_features().add_feature(_options);
 	_world.lv2_features().add_feature(
-		SPtr<LV2Features::Feature>(
-			new LV2Features::EmptyFeature(LV2_BUF_SIZE__powerOf2BlockLength)));
+	    std::make_shared<LV2Features::EmptyFeature>(
+	        LV2_BUF_SIZE__powerOf2BlockLength));
 	_world.lv2_features().add_feature(
-		SPtr<LV2Features::Feature>(
-			new LV2Features::EmptyFeature(LV2_BUF_SIZE__fixedBlockLength)));
+	    std::make_shared<LV2Features::EmptyFeature>(
+	        LV2_BUF_SIZE__fixedBlockLength));
 	_world.lv2_features().add_feature(
-		SPtr<LV2Features::Feature>(
-			new LV2Features::EmptyFeature(LV2_BUF_SIZE__boundedBlockLength)));
+	    std::make_shared<LV2Features::EmptyFeature>(
+	        LV2_BUF_SIZE__boundedBlockLength));
 	_world.lv2_features().add_feature(
-		SPtr<LV2Features::Feature>(
-			new LV2Features::EmptyFeature(LV2_STATE__loadDefaultState)));
+	    std::make_shared<LV2Features::EmptyFeature>(
+	        LV2_STATE__loadDefaultState));
 
 	if (world.conf().option("dump").get<int32_t>()) {
 		_interface = std::make_shared<Tee>(
@@ -154,28 +168,28 @@ Engine::~Engine()
 	// Delete run contexts
 	_quit_flag = true;
 	_tasks_available.notify_all();
-	for (const auto& ctx : _run_contexts) {
-		ctx->join();
+	for (const auto& thread_ctx : _run_contexts) {
+		thread_ctx->join();
 	}
 
-	const SPtr<Store> store = this->store();
+	const auto store = this->store();
 	if (store) {
-		for (auto& s : *store.get()) {
-			if (!dynamic_ptr_cast<NodeImpl>(s.second)->parent()) {
+		for (auto& s : *store) {
+			if (!std::dynamic_pointer_cast<NodeImpl>(s.second)->parent()) {
 				s.second.reset();
 			}
 		}
 		store->clear();
 	}
 
-	_world.set_store(SPtr<ingen::Store>());
+	_world.set_store(nullptr);
 }
 
 void
 Engine::listen()
 {
 #ifdef HAVE_SOCKET
-	_listener = UPtr<SocketListener>(new SocketListener(*this));
+	_listener = make_unique<SocketListener>(*this);
 #endif
 }
 
@@ -272,7 +286,7 @@ Engine::steal_task(unsigned start_thread)
 	return nullptr;
 }
 
-SPtr<Store>
+std::shared_ptr<Store>
 Engine::store() const
 {
 	return _world.store();
@@ -336,7 +350,7 @@ Engine::main_iteration()
 }
 
 void
-Engine::set_driver(const SPtr<Driver>& driver)
+Engine::set_driver(const std::shared_ptr<Driver>& driver)
 {
 	_driver = driver;
 	for (const auto& ctx : _run_contexts) {
@@ -375,7 +389,8 @@ Engine::reset_load()
 void
 Engine::init(double sample_rate, uint32_t block_length, size_t seq_size)
 {
-	set_driver(SPtr<Driver>(new DirectDriver(*this, sample_rate, block_length, seq_size)));
+	set_driver(std::make_shared<DirectDriver>(
+	    *this, sample_rate, block_length, seq_size));
 }
 
 bool
@@ -405,7 +420,7 @@ Engine::activate()
 
 		enqueue_event(
 			new events::CreateGraph(
-				*this, SPtr<Interface>(), -1, 0, Raul::Path("/"), properties));
+				*this, nullptr, -1, 0, raul::Path("/"), properties));
 
 		flush_events(std::chrono::milliseconds(10));
 		if (!_root_graph) {
@@ -510,14 +525,14 @@ Engine::log() const
 }
 
 void
-Engine::register_client(const SPtr<Interface>& client)
+Engine::register_client(const std::shared_ptr<Interface>& client)
 {
 	log().info("Registering client <%1%>\n", client->uri().c_str());
 	_broadcaster->register_client(client);
 }
 
 bool
-Engine::unregister_client(const SPtr<Interface>& client)
+Engine::unregister_client(const std::shared_ptr<Interface>& client)
 {
 	log().info("Unregistering client <%1%>\n", client->uri().c_str());
 	return _broadcaster->unregister_client(client);

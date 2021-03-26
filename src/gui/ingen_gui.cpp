@@ -14,12 +14,20 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "App.hpp"
+
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
+#include "ingen/Interface.hpp"
 #include "ingen/Module.hpp"
 #include "ingen/QueuedInterface.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/World.hpp"
 #include "ingen/client/SigClientInterface.hpp"
 
-#include "App.hpp"
+#include <glibmm/thread.h>
+
+#include <memory>
 
 namespace ingen {
 namespace gui {
@@ -32,7 +40,7 @@ struct GUIModule : public Module {
 		if (!world.interface()) {
 			world.set_interface(
 				world.new_interface(URI(uri), make_client(world)));
-		} else if (!dynamic_ptr_cast<SigClientInterface>(
+		} else if (!std::dynamic_pointer_cast<SigClientInterface>(
 			           world.interface()->respondee())) {
 			world.interface()->set_respondee(make_client(world));
 		}
@@ -44,12 +52,15 @@ struct GUIModule : public Module {
 		app->run();
 	}
 
-	SPtr<Interface> make_client(World& world) {
-		SPtr<SigClientInterface> sci(new SigClientInterface());
-		return world.engine() ? sci : SPtr<Interface>(new QueuedInterface(sci));
+	std::shared_ptr<Interface> make_client(World& world)
+	{
+		auto sci = std::make_shared<SigClientInterface>();
+		return world.engine()
+		           ? sci
+		           : std::shared_ptr<Interface>(new QueuedInterface(sci));
 	}
 
-	SPtr<gui::App> app;
+	std::shared_ptr<gui::App> app;
 };
 
 } // namespace gui

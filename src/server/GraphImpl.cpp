@@ -23,31 +23,39 @@
 #include "DuplexPort.hpp"
 #include "Engine.hpp"
 #include "GraphPlugin.hpp"
+#include "InputPort.hpp"
+#include "PluginImpl.hpp"
 #include "PortImpl.hpp"
 #include "ThreadManager.hpp"
 
 #include "ingen/Forge.hpp"
+#include "ingen/Properties.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "lv2/urid/urid.h"
+#include "raul/Array.hpp"
 #include "raul/Maid.hpp"
+#include "raul/Symbol.hpp"
 
 #include <cassert>
 #include <cstddef>
 #include <map>
+#include <memory>
+#include <type_traits>
 #include <unordered_map>
 
 namespace ingen {
 namespace server {
 
 GraphImpl::GraphImpl(Engine&             engine,
-                     const Raul::Symbol& symbol,
+                     const raul::Symbol& symbol,
                      uint32_t            poly,
                      GraphImpl*          parent,
                      SampleRate          srate,
                      uint32_t            internal_poly)
 	: BlockImpl(new GraphPlugin(engine.world().uris(),
 	                            engine.world().uris().ingen_Graph,
-	                            Raul::Symbol("graph"),
+	                            raul::Symbol("graph"),
 	                            "Ingen Graph"),
 	            symbol, poly, parent, srate)
 	, _engine(engine)
@@ -70,7 +78,7 @@ GraphImpl::~GraphImpl()
 
 BlockImpl*
 GraphImpl::duplicate(Engine&             engine,
-                     const Raul::Symbol& symbol,
+                     const raul::Symbol& symbol,
                      GraphImpl*          parent)
 {
 	BufferFactory&   bufs = *engine.buffer_factory();
@@ -116,7 +124,7 @@ GraphImpl::duplicate(Engine&             engine,
 
 	// Add duplicates of all arcs
 	for (const auto& a : _arcs) {
-		SPtr<ArcImpl> arc = dynamic_ptr_cast<ArcImpl>(a.second);
+		auto arc = std::dynamic_pointer_cast<ArcImpl>(a.second);
 		if (arc) {
 			auto t = port_map.find(arc->tail());
 			auto h = port_map.find(arc->head());
@@ -156,11 +164,11 @@ GraphImpl::deactivate()
 }
 
 void
-GraphImpl::disable(RunContext& context)
+GraphImpl::disable(RunContext& ctx)
 {
 	_process = false;
 	for (auto& o : _outputs) {
-		o.clear_buffers(context);
+		o.clear_buffers(ctx);
 	}
 }
 
@@ -180,22 +188,22 @@ GraphImpl::prepare_internal_poly(BufferFactory& bufs, uint32_t poly)
 }
 
 bool
-GraphImpl::apply_internal_poly(RunContext&    context,
+GraphImpl::apply_internal_poly(RunContext&    ctx,
                                BufferFactory& bufs,
-                               Raul::Maid&,
+                               raul::Maid&,
                                uint32_t poly)
 {
 	// TODO: Subgraph dynamic polyphony (i.e. changing port polyphony)
 
 	for (auto& b : _blocks) {
-		b.apply_poly(context, poly);
+		b.apply_poly(ctx, poly);
 	}
 
 	for (auto& b : _blocks) {
 		for (uint32_t j = 0; j < b.num_ports(); ++j) {
 			PortImpl* const port = b.port_impl(j);
 			if (port->is_input() && dynamic_cast<InputPort*>(port)->direct_connect()) {
-				port->setup_buffers(context, bufs, port->poly());
+				port->setup_buffers(ctx, bufs, port->poly());
 			}
 			port->connect_buffers();
 		}
@@ -203,7 +211,7 @@ GraphImpl::apply_internal_poly(RunContext&    context,
 
 	const bool polyphonic = parent_graph() && (poly == parent_graph()->internal_poly_process());
 	for (auto& o : _outputs) {
-		o.setup_buffers(context, bufs, polyphonic ? poly : 1);
+		o.setup_buffers(ctx, bufs, polyphonic ? poly : 1);
 	}
 
 	_poly_process = poly;
@@ -211,52 +219,52 @@ GraphImpl::apply_internal_poly(RunContext&    context,
 }
 
 void
-GraphImpl::pre_process(RunContext& context)
+GraphImpl::pre_process(RunContext& ctx)
 {
 	// Mix down input ports and connect buffers
 	for (uint32_t i = 0; i < num_ports(); ++i) {
 		PortImpl* const port = _ports->at(i);
 		if (!port->is_driver_port()) {
-			port->pre_process(context);
-			port->pre_run(context);
+			port->pre_process(ctx);
+			port->pre_run(ctx);
 			port->connect_buffers();
 		}
 	}
 }
 
 void
-GraphImpl::process(RunContext& context)
+GraphImpl::process(RunContext& ctx)
 {
 	if (!_process) {
 		return;
 	}
 
-	pre_process(context);
-	run(context);
-	post_process(context);
+	pre_process(ctx);
+	run(ctx);
+	post_process(ctx);
 }
 
 void
-GraphImpl::run(RunContext& context)
+GraphImpl::run(RunContext& ctx)
 {
 	if (_compiled_graph) {
-		_compiled_graph->run(context);
+		_compiled_graph->run(ctx);
 	}
 }
 
 void
-GraphImpl::set_buffer_size(RunContext&    context,
+GraphImpl::set_buffer_size(RunContext&    ctx,
                            BufferFactory& bufs,
                            LV2_URID       type,
                            uint32_t       size)
 {
-	BlockImpl::set_buffer_size(context, bufs, type, size);
+	BlockImpl::set_buffer_size(ctx, bufs, type, size);
 
 	if (_compiled_graph) {
 		// FIXME
 		// for (size_t i = 0; i < _compiled_graph->size(); ++i) {
 		// 	const CompiledBlock& block = (*_compiled_graph)[i];
-		// 	block.block()->set_buffer_size(context, bufs, type, size);
+		// 	block.block()->set_buffer_size(ctx, bufs, type, size);
 		// }
 	}
 }
@@ -275,23 +283,23 @@ GraphImpl::remove_block(BlockImpl& block)
 }
 
 void
-GraphImpl::add_arc(const SPtr<ArcImpl>& a)
+GraphImpl::add_arc(const std::shared_ptr<ArcImpl>& a)
 {
 	ThreadManager::assert_thread(THREAD_PRE_PROCESS);
 	_arcs.emplace(std::make_pair(a->tail(), a->head()), a);
 }
 
-SPtr<ArcImpl>
+std::shared_ptr<ArcImpl>
 GraphImpl::remove_arc(const PortImpl* tail, const PortImpl* dst_port)
 {
 	ThreadManager::assert_thread(THREAD_PRE_PROCESS);
 	auto i = _arcs.find(std::make_pair(tail, dst_port));
 	if (i != _arcs.end()) {
-		SPtr<ArcImpl> arc = dynamic_ptr_cast<ArcImpl>(i->second);
+		auto arc = std::dynamic_pointer_cast<ArcImpl>(i->second);
 		_arcs.erase(i);
 		return arc;
 	} else {
-		return SPtr<ArcImpl>();
+		return nullptr;
 	}
 }
 
@@ -304,7 +312,7 @@ GraphImpl::has_arc(const PortImpl* tail, const PortImpl* dst_port) const
 }
 
 void
-GraphImpl::set_compiled_graph(MPtr<CompiledGraph>&& cg)
+GraphImpl::set_compiled_graph(raul::managed_ptr<CompiledGraph>&& cg)
 {
 	if (_compiled_graph && _compiled_graph != cg) {
 		_engine.reset_load();
@@ -357,13 +365,13 @@ GraphImpl::clear_ports()
 	_outputs.clear();
 }
 
-MPtr<BlockImpl::Ports>
-GraphImpl::build_ports_array(Raul::Maid& maid)
+raul::managed_ptr<BlockImpl::Ports>
+GraphImpl::build_ports_array(raul::Maid& maid)
 {
 	ThreadManager::assert_thread(THREAD_PRE_PROCESS);
 
-	const size_t n = _inputs.size() + _outputs.size();
-	MPtr<Ports> result = maid.make_managed<Ports>(n);
+	const size_t             n      = _inputs.size() + _outputs.size();
+	raul::managed_ptr<Ports> result = maid.make_managed<Ports>(n);
 
 	std::map<size_t, DuplexPort*> ports;
 	for (auto& p : _inputs) {

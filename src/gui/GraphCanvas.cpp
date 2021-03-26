@@ -19,8 +19,6 @@
 #include "GraphCanvas.hpp"
 #include "GraphPortModule.hpp"
 #include "GraphWindow.hpp"
-#include "LoadPluginWindow.hpp"
-#include "NewSubgraphWindow.hpp"
 #include "NodeModule.hpp"
 #include "PluginMenu.hpp"
 #include "Port.hpp"
@@ -30,34 +28,85 @@
 #include "WindowFactory.hpp"
 
 #include "ganv/Canvas.hpp"
-#include "ganv/Circle.hpp"
+#include "ganv/Edge.hpp"
+#include "ganv/Module.hpp"
+#include "ganv/Node.hpp"
+#include "ganv/Port.hpp"
+#include "ganv/canvas.h"
+#include "ganv/edge.h"
+#include "ganv/module.h"
+#include "ganv/types.h"
+#include "ingen/Arc.hpp"
+#include "ingen/Atom.hpp"
 #include "ingen/ClashAvoider.hpp"
 #include "ingen/Configuration.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Parser.hpp"
 #include "ingen/Serialiser.hpp"
+#include "ingen/Store.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/client/ArcModel.hpp"
 #include "ingen/client/BlockModel.hpp"
 #include "ingen/client/ClientStore.hpp"
 #include "ingen/client/GraphModel.hpp"
+#include "ingen/client/ObjectModel.hpp"
 #include "ingen/client/PluginModel.hpp"
-#include "ingen/ingen.h"
-#include "lv2/atom/atom.h"
+#include "ingen/client/PortModel.hpp"
+#include "ingen/paths.hpp"
+#include "raul/Symbol.hpp"
+#include "sord/sordmm.hpp"
 
 #include <boost/optional/optional.hpp>
+#include <gdk/gdk.h>
+#include <gdk/gdkkeysyms-compat.h>
+#include <gdkmm/window.h>
+#include <glib.h>
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/checkmenuitem.h>
+#include <gtkmm/clipboard.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/image.h>
+#include <gtkmm/layout.h>
+#include <gtkmm/menu.h>
+#include <gtkmm/menu_elems.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/menushell.h>
+#include <gtkmm/object.h>
 #include <gtkmm/stock.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+#include <limits>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
+#include <vector>
 
 using std::string;
 
 namespace ingen {
 
-using namespace client;
+using client::ArcModel;
+using client::BlockModel;
+using client::GraphModel;
+using client::PluginModel;
+using client::PortModel;
 
 namespace gui {
 
@@ -67,28 +116,23 @@ port_order(const GanvPort* a, const GanvPort* b, void* data)
 	const Port* pa = dynamic_cast<const Port*>(Glib::wrap(a));
 	const Port* pb = dynamic_cast<const Port*>(Glib::wrap(b));
 	if (pa && pb) {
-		return ((int)pa->model()->index() - (int)pb->model()->index());
+		return (static_cast<int>(pa->model()->index()) -
+		        static_cast<int>(pb->model()->index()));
 	}
 	return 0;
 }
 
-GraphCanvas::GraphCanvas(App&                   app,
-                         SPtr<const GraphModel> graph,
-                         int                    width,
-                         int                    height)
-	: Canvas(width, height)
-	, _app(app)
-	, _graph(std::move(graph))
-	, _auto_position_count(0)
-	, _menu_x(0)
-	, _menu_y(0)
-	, _paste_count(0)
-	, _menu(nullptr)
-	, _internal_menu(nullptr)
-	, _plugin_menu(nullptr)
-	, _human_names(true)
-	, _show_port_names(true)
-	, _menu_dirty(false)
+GraphCanvas::GraphCanvas(App&                              app,
+                         std::shared_ptr<const GraphModel> graph,
+                         int                               width,
+                         int                               height)
+    : Canvas(width, height)
+    , _app(app)
+    , _graph(std::move(graph))
+    , _auto_position_count(0)
+    , _menu_x(0)
+    , _menu_y(0)
+    , _paste_count(0)
 {
 	Glib::RefPtr<Gtk::Builder> xml = WidgetFactory::create("canvas_menu");
 	xml->get_widget("canvas_menu", _menu);
@@ -226,8 +270,8 @@ GraphCanvas::build_menus()
 	}
 
 	// Add known plugins to menu heirarchy
-	SPtr<const ClientStore::Plugins> plugins = _app.store()->plugins();
-	for (const auto& p : *plugins.get()) {
+	auto plugins = _app.store()->plugins();
+	for (const auto& p : *plugins) {
 		add_plugin(p.second);
 	}
 
@@ -241,7 +285,7 @@ GraphCanvas::build()
 
 	// Create modules for blocks
 	for (Store::const_iterator i = kids.first; i != kids.second; ++i) {
-		SPtr<BlockModel> block = dynamic_ptr_cast<BlockModel>(i->second);
+		auto block = std::dynamic_pointer_cast<BlockModel>(i->second);
 		if (block && block->parent() == _graph) {
 			add_block(block);
 		}
@@ -254,22 +298,22 @@ GraphCanvas::build()
 
 	// Create arcs
 	for (const auto& a : _graph->arcs()) {
-		connection(dynamic_ptr_cast<ArcModel>(a.second));
+		connection(std::dynamic_pointer_cast<ArcModel>(a.second));
 	}
 }
 
 static void
 show_module_human_names(GanvNode* node, void* data)
 {
-	bool b = *(bool*)data;
+	bool b = *static_cast<bool*>(data);
 	if (GANV_IS_MODULE(node)) {
 		Ganv::Module* module = Glib::wrap(GANV_MODULE(node));
-		NodeModule* nmod = dynamic_cast<NodeModule*>(module);
+		auto* nmod = dynamic_cast<NodeModule*>(module);
 		if (nmod) {
 			nmod->show_human_names(b);
 		}
 
-		GraphPortModule* pmod = dynamic_cast<GraphPortModule*>(module);
+		auto* pmod = dynamic_cast<GraphPortModule*>(module);
 		if (pmod) {
 			pmod->show_human_names(b);
 		}
@@ -291,7 +335,7 @@ ensure_port_labels(GanvNode* node, void* data)
 	if (GANV_IS_MODULE(node)) {
 		Ganv::Module* module = Glib::wrap(GANV_MODULE(node));
 		for (Ganv::Port* p : *module) {
-			ingen::gui::Port* port = dynamic_cast<ingen::gui::Port*>(p);
+			auto* port = dynamic_cast<ingen::gui::Port*>(p);
 			if (port) {
 				port->ensure_label();
 			}
@@ -307,7 +351,7 @@ GraphCanvas::show_port_names(bool b)
 }
 
 void
-GraphCanvas::add_plugin(const SPtr<PluginModel>& p)
+GraphCanvas::add_plugin(const std::shared_ptr<PluginModel>& p)
 {
 	if (_internal_menu && _app.uris().ingen_Internal == p->type()) {
 		_internal_menu->items().push_back(
@@ -327,10 +371,10 @@ GraphCanvas::remove_plugin(const URI& uri)
 }
 
 void
-GraphCanvas::add_block(const SPtr<const BlockModel>& bm)
+GraphCanvas::add_block(const std::shared_ptr<const BlockModel>& bm)
 {
-	SPtr<const GraphModel> pm = dynamic_ptr_cast<const GraphModel>(bm);
-	NodeModule*            module;
+	auto        pm     = std::dynamic_pointer_cast<const GraphModel>(bm);
+	NodeModule* module = nullptr;
 	if (pm) {
 		module = SubgraphModule::create(*this, pm, _human_names);
 	} else {
@@ -345,7 +389,7 @@ GraphCanvas::add_block(const SPtr<const BlockModel>& bm)
 }
 
 void
-GraphCanvas::remove_block(const SPtr<const BlockModel>& bm)
+GraphCanvas::remove_block(const std::shared_ptr<const BlockModel>& bm)
 {
 	auto i = _views.find(bm);
 
@@ -360,7 +404,7 @@ GraphCanvas::remove_block(const SPtr<const BlockModel>& bm)
 }
 
 void
-GraphCanvas::add_port(const SPtr<const PortModel>& pm)
+GraphCanvas::add_port(const std::shared_ptr<const PortModel>& pm)
 {
 	GraphPortModule* view = GraphPortModule::create(*this, pm);
 	_views.emplace(pm, view);
@@ -368,7 +412,7 @@ GraphCanvas::add_port(const SPtr<const PortModel>& pm)
 }
 
 void
-GraphCanvas::remove_port(const SPtr<const PortModel>& pm)
+GraphCanvas::remove_port(const std::shared_ptr<const PortModel>& pm)
 {
 	auto i = _views.find(pm);
 
@@ -386,21 +430,21 @@ GraphCanvas::remove_port(const SPtr<const PortModel>& pm)
 }
 
 Ganv::Port*
-GraphCanvas::get_port_view(const SPtr<PortModel>& port)
+GraphCanvas::get_port_view(const std::shared_ptr<PortModel>& port)
 {
 	Ganv::Module* module = _views[port];
 
 	// Port on this graph
 	if (module) {
-		GraphPortModule* ppm = dynamic_cast<GraphPortModule*>(module);
+		auto* ppm = dynamic_cast<GraphPortModule*>(module);
 		return ppm
 			? *ppm->begin()
 			: dynamic_cast<Ganv::Port*>(module);
 	} else {
 		module = dynamic_cast<NodeModule*>(_views[port->parent()]);
 		if (module) {
-			for (const auto& p : *module) {
-				gui::Port* pv = dynamic_cast<gui::Port*>(p);
+			for (auto* p : *module) {
+				auto* pv = dynamic_cast<gui::Port*>(p);
 				if (pv && pv->model() == port) {
 					return pv;
 				}
@@ -413,7 +457,7 @@ GraphCanvas::get_port_view(const SPtr<PortModel>& port)
 
 /** Called when a connection is added to the model. */
 void
-GraphCanvas::connection(const SPtr<const ArcModel>& arc)
+GraphCanvas::connection(const std::shared_ptr<const ArcModel>& arc)
 {
 	Ganv::Port* const tail = get_port_view(arc->tail());
 	Ganv::Port* const head = get_port_view(arc->head());
@@ -428,7 +472,7 @@ GraphCanvas::connection(const SPtr<const ArcModel>& arc)
 
 /** Called when a connection is removed from the model. */
 void
-GraphCanvas::disconnection(const SPtr<const ArcModel>& arc)
+GraphCanvas::disconnection(const std::shared_ptr<const ArcModel>& arc)
 {
 	Ganv::Port* const tail = get_port_view(arc->tail());
 	Ganv::Port* const head = get_port_view(arc->head());
@@ -436,7 +480,7 @@ GraphCanvas::disconnection(const SPtr<const ArcModel>& arc)
 	if (tail && head) {
 		remove_edge_between(tail, head);
 		if (arc->head()->is_a(_app.uris().lv2_AudioPort)) {
-			gui::Port* const h = dynamic_cast<gui::Port*>(head);
+			auto* const h = dynamic_cast<gui::Port*>(head);
 			if (h) {
 				h->activity(_app.forge().make(0.0f));  // Reset peaks
 			}
@@ -490,8 +534,8 @@ GraphCanvas::auto_menu_position(int& x, int& y, bool& push_in)
 			*_app.window_factory()->graph_window(_graph),
 			64, 64, _menu_x, _menu_y);
 
-		int origin_x;
-		int origin_y;
+		int origin_x = 0;
+		int origin_y = 0;
 		widget().get_window()->get_origin(origin_x, origin_y);
 		_menu_x += origin_x;
 		_menu_y += origin_y;
@@ -518,8 +562,8 @@ GraphCanvas::on_event(GdkEvent* event)
 	case GDK_BUTTON_PRESS:
 		if (event->button.button == 3) {
 			_auto_position_count = 1;
-			_menu_x = (int)event->button.x_root;
-			_menu_y = (int)event->button.y_root;
+			_menu_x = static_cast<int>(event->button.x_root);
+			_menu_y = static_cast<int>(event->button.y_root);
 			show_menu(false, event->button.button, event->button.time);
 			ret = true;
 		}
@@ -537,6 +581,7 @@ GraphCanvas::on_event(GdkEvent* event)
 		case GDK_space:
 		case GDK_Menu:
 			show_menu(true, 3, event->key.time);
+			break;
 		default: break;
 		}
 		break;
@@ -569,14 +614,14 @@ destroy_node(GanvNode* node, void* data)
 		return;
 	}
 
-	App*          app         = (App*)data;
+	App*          app         = static_cast<App*>(data);
 	Ganv::Module* module      = Glib::wrap(GANV_MODULE(node));
-	NodeModule*   node_module = dynamic_cast<NodeModule*>(module);
+	auto*         node_module = dynamic_cast<NodeModule*>(module);
 
 	if (node_module) {
 		app->interface()->del(node_module->block()->uri());
 	} else {
-		GraphPortModule* port_module = dynamic_cast<GraphPortModule*>(module);
+		auto* port_module = dynamic_cast<GraphPortModule*>(module);
 		if (port_module &&
 		    strcmp(port_module->port()->path().symbol(), "control") &&
 		    strcmp(port_module->port()->path().symbol(), "notify")) {
@@ -588,7 +633,7 @@ destroy_node(GanvNode* node, void* data)
 static void
 destroy_arc(GanvEdge* arc, void* data)
 {
-	App*        app   = (App*)data;
+	App*        app   = static_cast<App*>(data);
 	Ganv::Edge* arcmm = Glib::wrap(arc);
 
 	Port* tail = dynamic_cast<Port*>(arcmm->get_tail());
@@ -600,26 +645,29 @@ void
 GraphCanvas::destroy_selection()
 {
 	_app.interface()->bundle_begin();
+
+	// TODO: Refine this to not destroy arcs that will be anyway?
 	for_each_selected_edge(destroy_arc, &_app);
 	for_each_selected_node(destroy_node, &_app);
+
 	_app.interface()->bundle_end();
 }
 
 static void
 serialise_node(GanvNode* node, void* data)
 {
-	Serialiser* serialiser = (Serialiser*)data;
+	auto* serialiser = static_cast<Serialiser*>(data);
 	if (!GANV_IS_MODULE(node)) {
 		return;
 	}
 
 	Ganv::Module* module      = Glib::wrap(GANV_MODULE(node));
-	NodeModule*   node_module = dynamic_cast<NodeModule*>(module);
+	auto*         node_module = dynamic_cast<NodeModule*>(module);
 
 	if (node_module) {
 		serialiser->serialise(node_module->block());
 	} else {
-		GraphPortModule* port_module = dynamic_cast<GraphPortModule*>(module);
+		auto* port_module = dynamic_cast<GraphPortModule*>(module);
 		if (port_module) {
 			serialiser->serialise(port_module->port());
 		}
@@ -629,12 +677,12 @@ serialise_node(GanvNode* node, void* data)
 static void
 serialise_arc(GanvEdge* arc, void* data)
 {
-	Serialiser* serialiser = (Serialiser*)data;
+	auto* serialiser = static_cast<Serialiser*>(data);
 	if (!GANV_IS_EDGE(arc)) {
 		return;
 	}
 
-	gui::Arc* garc = dynamic_cast<gui::Arc*>(Glib::wrap(GANV_EDGE(arc)));
+	auto* garc = dynamic_cast<gui::Arc*>(Glib::wrap(GANV_EDGE(arc)));
 	if (garc) {
 		serialiser->serialise_arc(Sord::Node(), garc->model());
 	}
@@ -664,9 +712,9 @@ GraphCanvas::paste()
 	std::lock_guard<std::mutex> lock(_app.world().rdf_mutex());
 
 	const Glib::ustring str    = Gtk::Clipboard::get()->wait_for_text();
-	SPtr<Parser>        parser = _app.loader()->parser();
+	auto                parser = _app.loader()->parser();
 	const URIs&         uris   = _app.uris();
-	const Raul::Path&   parent = _graph->path();
+	const raul::Path&   parent = _graph->path();
 	if (!parser) {
 		_app.log().error("Unable to load parser, paste unavailable\n");
 		return;
@@ -678,7 +726,7 @@ GraphCanvas::paste()
 	++_paste_count;
 
 	// Make a client store to serve as clipboard
-	ClientStore clipboard(_app.world().uris(), _app.log());
+	client::ClientStore clipboard(_app.world().uris(), _app.log());
 	clipboard.set_plugins(_app.store()->plugins());
 	clipboard.put(main_uri(),
 	              {{uris.rdf_type, Property(uris.ingen_Graph)}});
@@ -688,7 +736,7 @@ GraphCanvas::paste()
 		_app.world(), clipboard, str, main_uri());
 
 	// Figure out the copy graph base path
-	Raul::Path copy_root("/");
+	raul::Path copy_root("/");
 	if (base_uri) {
 		std::string base = *base_uri;
 		if (base[base.size() - 1] == '/') {
@@ -701,7 +749,7 @@ GraphCanvas::paste()
 	float min_x = std::numeric_limits<float>::max();
 	float min_y = std::numeric_limits<float>::max();
 	for (const auto& c : clipboard) {
-		if (c.first.parent() == Raul::Path("/")) {
+		if (c.first.parent() == raul::Path("/")) {
 			const Atom& x = c.second->get_property(uris.ingen_canvasX);
 			const Atom& y = c.second->get_property(uris.ingen_canvasY);
 			if (x.type() == uris.atom_Float) {
@@ -714,7 +762,10 @@ GraphCanvas::paste()
 	}
 
 	// Find canvas paste origin based on pointer position
-	int widget_point_x, widget_point_y, scroll_x, scroll_y;
+	int widget_point_x = 0;
+	int widget_point_y = 0;
+	int scroll_x       = 0;
+	int scroll_y       = 0;
 	widget().get_pointer(widget_point_x, widget_point_y);
 	get_scroll_offsets(scroll_x, scroll_y);
 	const int paste_x = widget_point_x + scroll_x + (20.0f * _paste_count);
@@ -723,16 +774,17 @@ GraphCanvas::paste()
 	_app.interface()->bundle_begin();
 
 	// Put each top level object in the clipboard store
-	ClashAvoider avoider(*_app.store().get());
+	ClashAvoider avoider(*_app.store());
 	for (const auto& c : clipboard) {
-		if (c.first.is_root() || c.first.parent() != Raul::Path("/")) {
+		if (c.first.is_root() || c.first.parent() != raul::Path("/")) {
 			continue;
 		}
 
-		const SPtr<Node>  node     = c.second;
-		const Raul::Path& old_path = copy_root.child(node->path());
+		const auto        node     = c.second;
+		const raul::Path& old_path = copy_root.child(node->path());
 		const URI&        old_uri  = path_to_uri(old_path);
-		const Raul::Path& new_path = avoider.map_path(parent.child(node->path()));
+		const raul::Path& new_path =
+		    avoider.map_path(parent.child(node->path()));
 
 		// Copy properties, except those that should not be inherited in copies
 		Properties props = node->properties();
@@ -773,7 +825,7 @@ GraphCanvas::paste()
 	}
 
 	// Connect objects
-	for (auto a : clipboard.object(Raul::Path("/"))->arcs()) {
+	for (const auto& a : clipboard.object(raul::Path("/"))->arcs()) {
 		_app.interface()->connect(
 			avoider.map_path(parent.child(a.second->tail_path())),
 			avoider.map_path(parent.child(a.second->head_path())));
@@ -796,12 +848,12 @@ GraphCanvas::generate_port_name(
 		snprintf(num_buf, sizeof(num_buf), "%u", i);
 		symbol = sym_base + "_";
 		symbol += num_buf;
-		if (!_graph->get_port(Raul::Symbol::symbolify(symbol))) {
+		if (!_graph->get_port(raul::Symbol::symbolify(symbol))) {
 			break;
 		}
 	}
 
-	assert(Raul::Path::is_valid(string("/") + symbol));
+	assert(raul::Path::is_valid(string("/") + symbol));
 
 	name.append(" ").append(num_buf);
 }
@@ -812,9 +864,10 @@ GraphCanvas::menu_add_port(const string& sym_base,
                            const URI&    type,
                            bool          is_output)
 {
-	string sym, name;
+	string sym;
+	string name;
 	generate_port_name(sym_base, sym, name_base, name);
-	const Raul::Path& path = _graph->path().child(Raul::Symbol(sym));
+	const raul::Path& path = _graph->path().child(raul::Symbol(sym));
 
 	const URIs& uris = _app.uris();
 
@@ -833,23 +886,23 @@ GraphCanvas::menu_add_port(const string& sym_base,
 }
 
 void
-GraphCanvas::load_plugin(WPtr<PluginModel> weak_plugin)
+GraphCanvas::load_plugin(const std::weak_ptr<PluginModel>& weak_plugin)
 {
-	SPtr<PluginModel> plugin = weak_plugin.lock();
+	auto plugin = weak_plugin.lock();
 	if (!plugin) {
 		return;
 	}
 
-	Raul::Symbol symbol = plugin->default_block_symbol();
+	raul::Symbol symbol = plugin->default_block_symbol();
 	unsigned offset = _app.store()->child_name_offset(_graph->path(), symbol);
 	if (offset != 0) {
 		std::stringstream ss;
 		ss << symbol << "_" << offset;
-		symbol = Raul::Symbol(ss.str());
+		symbol = raul::Symbol(ss.str());
 	}
 
 	const URIs&      uris = _app.uris();
-	const Raul::Path path = _graph->path().child(symbol);
+	const raul::Path path = _graph->path().child(symbol);
 
 	// FIXME: polyphony?
 	Properties props = get_initial_data();
@@ -863,8 +916,8 @@ GraphCanvas::load_plugin(WPtr<PluginModel> weak_plugin)
 void
 GraphCanvas::get_new_module_location(double& x, double& y)
 {
-	int scroll_x;
-	int scroll_y;
+	int scroll_x = 0;
+	int scroll_y = 0;
 	get_scroll_offsets(scroll_x, scroll_y);
 	x = scroll_x + 20;
 	y = scroll_y + 20;
@@ -876,9 +929,11 @@ GraphCanvas::get_initial_data(Resource::Graph ctx)
 	Properties result;
 	const URIs& uris = _app.uris();
 	result.emplace(uris.ingen_canvasX,
-	               Property(_app.forge().make((float)_menu_x), ctx));
+	               Property(_app.forge().make(static_cast<float>(_menu_x)),
+	                        ctx));
 	result.emplace(uris.ingen_canvasY,
-	               Property(_app.forge().make((float)_menu_y), ctx));
+	               Property(_app.forge().make(static_cast<float>(_menu_y)),
+	                        ctx));
 	return result;
 }
 

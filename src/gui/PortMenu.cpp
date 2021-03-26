@@ -17,18 +17,38 @@
 #include "PortMenu.hpp"
 
 #include "App.hpp"
-#include "WindowFactory.hpp"
+#include "ObjectMenu.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
-#include "ingen/client/GraphModel.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/client/BlockModel.hpp"
+#include "ingen/client/GraphModel.hpp" // IWYU pragma: keep
+#include "ingen/client/ObjectModel.hpp"
 #include "ingen/client/PortModel.hpp"
-#include "ingen/types.hpp"
+#include "ingen/paths.hpp"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/checkmenuitem.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/separatormenuitem.h>
+#include <sigc++/functors/mem_fun.h>
+
+#include <memory>
 #include <string>
 
 namespace ingen {
 
-using namespace client;
+using client::BlockModel;
+using client::GraphModel;
+using client::PortModel;
 
 namespace gui {
 
@@ -45,7 +65,9 @@ PortMenu::PortMenu(BaseObjectType*                   cobject,
 }
 
 void
-PortMenu::init(App& app, SPtr<const PortModel> port, bool internal_graph_port)
+PortMenu::init(App&                                    app,
+               const std::shared_ptr<const PortModel>& port,
+               bool                                    internal_graph_port)
 {
 	const URIs& uris = app.uris();
 
@@ -65,7 +87,7 @@ PortMenu::init(App& app, SPtr<const PortModel> port, bool internal_graph_port)
 		sigc::mem_fun(this, &PortMenu::on_menu_expose));
 
 	const bool is_control(app.can_control(port.get()) && port->is_numeric());
-	const bool is_on_graph(dynamic_ptr_cast<GraphModel>(port->parent()));
+	const bool is_on_graph(std::dynamic_pointer_cast<GraphModel>(port->parent()));
 	const bool is_input(port->is_input());
 
 	if (!is_on_graph) {
@@ -107,9 +129,9 @@ PortMenu::on_menu_disconnect()
 void
 PortMenu::on_menu_set_min()
 {
-	const URIs&           uris  = _app->uris();
-	SPtr<const PortModel> model = dynamic_ptr_cast<const PortModel>(_object);
-	const Atom&           value = model->get_property(uris.ingen_value);
+	const URIs& uris  = _app->uris();
+	auto        model = std::dynamic_pointer_cast<const PortModel>(_object);
+	const Atom& value = model->get_property(uris.ingen_value);
 	if (value.is_valid()) {
 		_app->set_property(_object->uri(), uris.lv2_minimum, value);
 	}
@@ -118,9 +140,9 @@ PortMenu::on_menu_set_min()
 void
 PortMenu::on_menu_set_max()
 {
-	const URIs&           uris  = _app->uris();
-	SPtr<const PortModel> model = dynamic_ptr_cast<const PortModel>(_object);
-	const Atom&           value = model->get_property(uris.ingen_value);
+	const URIs& uris  = _app->uris();
+	auto        model = std::dynamic_pointer_cast<const PortModel>(_object);
+	const Atom& value = model->get_property(uris.ingen_value);
 	if (value.is_valid()) {
 		_app->set_property(_object->uri(), uris.lv2_maximum, value);
 	}
@@ -129,8 +151,8 @@ PortMenu::on_menu_set_max()
 void
 PortMenu::on_menu_reset_range()
 {
-	const URIs&           uris  = _app->uris();
-	SPtr<const PortModel> model = dynamic_ptr_cast<const PortModel>(_object);
+	const URIs& uris  = _app->uris();
+	auto        model = std::dynamic_pointer_cast<const PortModel>(_object);
 
 	// Remove lv2:minimum and lv2:maximum properties
 	Properties remove;
@@ -142,14 +164,14 @@ PortMenu::on_menu_reset_range()
 void
 PortMenu::on_menu_expose()
 {
-	const URIs&            uris  = _app->uris();
-	SPtr<const PortModel>  port  = dynamic_ptr_cast<const PortModel>(_object);
-	SPtr<const BlockModel> block = dynamic_ptr_cast<const BlockModel>(port->parent());
+	const URIs& uris = _app->uris();
+	auto        port = std::dynamic_pointer_cast<const PortModel>(_object);
+	auto block = std::dynamic_pointer_cast<const BlockModel>(port->parent());
 
 	const std::string label = block->label() + " " + block->port_label(port);
-	const Raul::Path  path  = Raul::Path(block->path() + Raul::Symbol("_" + port->symbol()));
+	const raul::Path  path  = raul::Path(block->path() + raul::Symbol("_" + port->symbol()));
 
-	ingen::Resource r(*_object.get());
+	ingen::Resource r(*_object);
 	r.remove_property(uris.lv2_index, uris.patch_wildcard);
 	r.set_property(uris.lv2_symbol, _app->forge().alloc(path.symbol()));
 	r.set_property(uris.lv2_name, _app->forge().alloc(label.c_str()));

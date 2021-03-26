@@ -20,19 +20,32 @@
 #include "GraphBox.hpp"
 #include "Window.hpp"
 
-#include "ingen/types.hpp"
+#include <gdk/gdk.h>
+#include <gtkmm/window.h>
 
-#include <gtkmm/builder.h>
-
+#include <memory>
 #include <string>
+
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+} // namespace Gtk
 
 namespace ingen {
 
+class Atom;
+
 namespace client {
 class GraphModel;
-}
+class PortModel;
+} // namespace client
 
 namespace gui {
+
+class App;
 
 /** A window for a graph.
  *
@@ -44,12 +57,16 @@ public:
 	GraphWindow(BaseObjectType*                   cobject,
 	            const Glib::RefPtr<Gtk::Builder>& xml);
 
-	~GraphWindow();
+	~GraphWindow() override;
 
 	void init_window(App& app) override;
 
-	SPtr<const client::GraphModel> graph() const { return _box->graph(); }
-	GraphBox*                      box()   const { return _box; }
+	std::shared_ptr<const client::GraphModel> graph() const
+	{
+		return _box->graph();
+	}
+
+	GraphBox* box() const { return _box; }
 
 	bool documentation_is_visible() { return _box->documentation_is_visible(); }
 

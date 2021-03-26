@@ -20,20 +20,30 @@
 #include "BlockImpl.hpp"
 #include "Event.hpp"
 #include "PortType.hpp"
+#include "types.hpp"
 
+#include "ingen/Properties.hpp"
 #include "lv2/urid/urid.h"
+#include "raul/Maid.hpp"
 #include "raul/Path.hpp"
 
 #include <boost/optional/optional.hpp>
 
 #include <cstdint>
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
 class DuplexPort;
+class Engine;
 class EnginePort;
 class GraphImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -44,15 +54,15 @@ namespace events {
 class CreatePort : public Event
 {
 public:
-	CreatePort(Engine&                engine,
-	           const SPtr<Interface>& client,
-	           int32_t                id,
-	           SampleCount            timestamp,
-	           const Raul::Path&      path,
-	           const Properties&      properties);
+	CreatePort(Engine&                           engine,
+	           const std::shared_ptr<Interface>& client,
+	           int32_t                           id,
+	           SampleCount                       timestamp,
+	           raul::Path                        path,
+	           const Properties&                 properties);
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
@@ -62,16 +72,16 @@ private:
 		OUTPUT
 	};
 
-	Raul::Path             _path;
-	PortType               _port_type;
-	LV2_URID               _buf_type;
-	GraphImpl*             _graph;
-	DuplexPort*            _graph_port;
-	MPtr<BlockImpl::Ports> _ports_array; ///< New external port array for Graph
-	EnginePort*            _engine_port; ///< Driver port if on the root
-	Properties             _properties;
-	Properties             _update;
-	boost::optional<Flow>  _flow;
+	raul::Path                          _path;
+	PortType                            _port_type;
+	LV2_URID                            _buf_type;
+	GraphImpl*                          _graph;
+	DuplexPort*                         _graph_port;
+	raul::managed_ptr<BlockImpl::Ports> _ports_array; ///< New external port array for Graph
+	EnginePort*                         _engine_port; ///< Driver port if on the root
+	Properties                          _properties;
+	Properties                          _update;
+	boost::optional<Flow>               _flow;
 };
 
 } // namespace events

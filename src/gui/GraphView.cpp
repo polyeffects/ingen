@@ -15,31 +15,47 @@
 */
 
 #include "App.hpp"
-#include "LoadPluginWindow.hpp"
-#include "NewSubgraphWindow.hpp"
 #include "GraphCanvas.hpp"
-#include "GraphTreeWindow.hpp"
 #include "GraphView.hpp"
 #include "WidgetFactory.hpp"
 
-#include "ingen/Interface.hpp"
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/GraphModel.hpp"
 
+#include <glibmm/propertyproxy.h>
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <gtkmm/adjustment.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/layout.h>
+#include <gtkmm/scrolledwindow.h>
+#include <gtkmm/spinbutton.h>
+#include <gtkmm/toggletoolbutton.h>
+#include <gtkmm/toolbar.h>
+#include <gtkmm/toolitem.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
+
 #include <cassert>
-#include <fstream>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <utility>
 
 namespace ingen {
 
-using namespace client;
+using client::GraphModel;
 
 namespace gui {
 
 GraphView::GraphView(BaseObjectType*                   cobject,
                      const Glib::RefPtr<Gtk::Builder>& xml)
 	: Gtk::Box(cobject)
-	, _app(nullptr)
-	, _breadcrumb_container(nullptr)
-	, _enable_signal(true)
 {
 	property_visible() = false;
 
@@ -66,14 +82,14 @@ GraphView::init(App& app)
 }
 
 void
-GraphView::set_graph(const SPtr<const GraphModel>& graph)
+GraphView::set_graph(const std::shared_ptr<const GraphModel>& graph)
 {
 	assert(!_canvas); // FIXME: remove
 
 	assert(_breadcrumb_container); // ensure created
 
 	_graph = graph;
-	_canvas = SPtr<GraphCanvas>(new GraphCanvas(*_app, graph, 1600*2, 1200*2));
+	_canvas = std::make_shared<GraphCanvas>(*_app, graph, 1600*2, 1200*2);
 	_canvas->build();
 
 	_canvas_scrolledwindow->add(_canvas->widget());
@@ -100,15 +116,20 @@ GraphView::set_graph(const SPtr<const GraphModel>& graph)
 	_canvas->widget().grab_focus();
 }
 
-SPtr<GraphView>
-GraphView::create(App& app, const SPtr<const GraphModel>& graph)
+std::shared_ptr<GraphView>
+GraphView::create(App& app, const std::shared_ptr<const GraphModel>& graph)
 {
-	GraphView* result = nullptr;
-	Glib::RefPtr<Gtk::Builder> xml = WidgetFactory::create("warehouse_win");
+	GraphView*                 result = nullptr;
+	Glib::RefPtr<Gtk::Builder> xml    = WidgetFactory::create("warehouse_win");
+
 	xml->get_widget_derived("graph_view_box", result);
+	if (!result) {
+		return nullptr;
+	}
+
 	result->init(app);
 	result->set_graph(graph);
-	return SPtr<GraphView>(result);
+	return std::shared_ptr<GraphView>(result);
 }
 
 void
@@ -120,14 +141,15 @@ GraphView::process_toggled()
 
 	_app->set_property(_graph->uri(),
 	                   _app->uris().ingen_enabled,
-	                   _app->forge().make((bool)_process_but->get_active()));
+	                   _app->forge().make(
+	                       static_cast<bool>(_process_but->get_active())));
 }
 
 void
 GraphView::poly_changed()
 {
 	const int poly = _poly_spin->get_value_as_int();
-	if (_enable_signal && poly != (int)_graph->internal_poly()) {
+	if (_enable_signal && poly != static_cast<int>(_graph->internal_poly())) {
 		_app->set_property(_graph->uri(),
 		                   _app->uris().ingen_polyphony,
 		                   _app->forge().make(poly));

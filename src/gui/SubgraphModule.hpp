@@ -17,18 +17,18 @@
 #ifndef INGEN_GUI_SUBGRAPHMODULE_HPP
 #define INGEN_GUI_SUBGRAPHMODULE_HPP
 
-#include "ingen/types.hpp"
-
 #include "NodeModule.hpp"
-#include "GraphPortModule.hpp"
 
-namespace ingen { namespace client {
-class GraphModel;
-class GraphWindow;
-class PortModel;
-} }
+#include <gdk/gdk.h>
+
+#include <memory>
 
 namespace ingen {
+
+namespace client {
+class GraphModel;
+} // namespace client
+
 namespace gui {
 
 class GraphCanvas;
@@ -40,10 +40,10 @@ class GraphCanvas;
 class SubgraphModule : public NodeModule
 {
 public:
-	SubgraphModule(GraphCanvas&                        canvas,
-	               SPtr<const client::GraphModel> graph);
+	SubgraphModule(GraphCanvas&                                     canvas,
+	               const std::shared_ptr<const client::GraphModel>& graph);
 
-	virtual ~SubgraphModule() {}
+	~SubgraphModule() override = default;
 
 	bool on_double_click(GdkEventButton* event) override;
 
@@ -52,10 +52,10 @@ public:
 	void browse_to_graph();
 	void menu_remove();
 
-	SPtr<const client::GraphModel> graph() const { return _graph; }
+	std::shared_ptr<const client::GraphModel> graph() const { return _graph; }
 
 protected:
-	SPtr<const client::GraphModel> _graph;
+	std::shared_ptr<const client::GraphModel> _graph;
 };
 
 } // namespace gui

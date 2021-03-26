@@ -16,31 +16,43 @@
 
 #include "internals/Time.hpp"
 
+#include "BlockImpl.hpp"
 #include "Buffer.hpp"
+#include "BufferFactory.hpp"
+#include "BufferRef.hpp"
 #include "Driver.hpp"
 #include "Engine.hpp"
 #include "InternalPlugin.hpp"
 #include "OutputPort.hpp"
+#include "PortType.hpp"
 #include "RunContext.hpp"
-#include "util.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
-#include "lv2/atom/util.h"
-#include "lv2/midi/midi.h"
+#include "lv2/atom/atom.h"
+#include "raul/Array.hpp"
+#include "raul/Maid.hpp"
+#include "raul/Symbol.hpp"
+
+#include <memory>
 
 namespace ingen {
 namespace server {
+
+class GraphImpl;
+
 namespace internals {
 
 InternalPlugin* TimeNode::internal_plugin(URIs& uris) {
 	return new InternalPlugin(
-		uris, URI(NS_INTERNALS "Time"), Raul::Symbol("time"));
+		uris, URI(NS_INTERNALS "Time"), raul::Symbol("time"));
 }
 
 TimeNode::TimeNode(InternalPlugin*     plugin,
                    BufferFactory&      bufs,
-                   const Raul::Symbol& symbol,
+                   const raul::Symbol& symbol,
                    bool                polyphonic,
                    GraphImpl*          parent,
                    SampleRate          srate)
@@ -50,7 +62,7 @@ TimeNode::TimeNode(InternalPlugin*     plugin,
 	_ports = bufs.maid().make_managed<Ports>(1);
 
 	_notify_port = new OutputPort(
-		bufs, this, Raul::Symbol("notify"), 0, 1,
+		bufs, this, raul::Symbol("notify"), 0, 1,
 		PortType::ATOM, uris.atom_Sequence, Atom(), 1024);
 	_notify_port->set_property(uris.lv2_name, bufs.forge().alloc("Notify"));
 	_notify_port->set_property(uris.atom_supports,
@@ -59,10 +71,10 @@ TimeNode::TimeNode(InternalPlugin*     plugin,
 }
 
 void
-TimeNode::run(RunContext& context)
+TimeNode::run(RunContext& ctx)
 {
-	BufferRef          buf = _notify_port->buffer(0);
-	LV2_Atom_Sequence* seq = buf->get<LV2_Atom_Sequence>();
+	BufferRef buf = _notify_port->buffer(0);
+	auto*     seq = buf->get<LV2_Atom_Sequence>();
 
 	// Initialise output to the empty sequence
 	seq->atom.type = _notify_port->bufs().uris().atom_Sequence;
@@ -71,8 +83,7 @@ TimeNode::run(RunContext& context)
 	seq->body.pad  = 0;
 
 	// Ask the driver to append any time events for this cycle
-	context.engine().driver()->append_time_events(
-		context, *_notify_port->buffer(0));
+	ctx.engine().driver()->append_time_events(ctx, *_notify_port->buffer(0));
 }
 
 } // namespace internals

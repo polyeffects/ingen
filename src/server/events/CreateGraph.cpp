@@ -16,37 +16,54 @@
 
 #include "events/CreateGraph.hpp"
 
+#include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "PreProcessContext.hpp"
 #include "events/CreatePort.hpp"
+#include "types.hpp"
 
 #include "ingen/Forge.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/memory.hpp"
+#include "ingen/paths.hpp"
 #include "raul/Maid.hpp"
 #include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
+#include <boost/intrusive/slist.hpp>
+
+#include <map>
+#include <memory>
 #include <utility>
 
 namespace ingen {
 namespace server {
 namespace events {
 
-CreateGraph::CreateGraph(Engine&                engine,
-                         const SPtr<Interface>& client,
-                         int32_t                id,
-                         SampleCount            timestamp,
-                         const Raul::Path&      path,
-                         const Properties&      properties)
-	: Event(engine, client, id, timestamp)
-	, _path(path)
-	, _properties(properties)
-	, _graph(nullptr)
-	, _parent(nullptr)
+CreateGraph::CreateGraph(Engine&                           engine,
+                         const std::shared_ptr<Interface>& client,
+                         int32_t                           id,
+                         SampleCount                       timestamp,
+                         raul::Path                        path,
+                         const Properties&                 properties)
+    : Event(engine, client, id, timestamp)
+    , _path(std::move(path))
+    , _properties(properties)
+    , _graph(nullptr)
+    , _parent(nullptr)
 {}
+
+CreateGraph::~CreateGraph() = default;
 
 void
 CreateGraph::build_child_events()
@@ -74,7 +91,7 @@ CreateGraph::build_child_events()
 
 	_child_events.push_back(
 		make_unique<events::CreatePort>(_engine, _request_client, -1, _time,
-		                                _path.child(Raul::Symbol("control")),
+		                                _path.child(raul::Symbol("control")),
 		                                in_properties));
 
 	// Add notify port (message respond)
@@ -89,7 +106,7 @@ CreateGraph::build_child_events()
 
 	_child_events.push_back(
 		make_unique<events::CreatePort>(_engine, _request_client, -1, _time,
-		                                _path.child(Raul::Symbol("notify")),
+		                                _path.child(raul::Symbol("notify")),
 		                                out_properties));
 }
 
@@ -101,7 +118,7 @@ CreateGraph::pre_process(PreProcessContext& ctx)
 	}
 
 	if (!_path.is_root()) {
-		const Raul::Path up(_path.parent());
+		const raul::Path up(_path.parent());
 		if (!(_parent = dynamic_cast<GraphImpl*>(_engine.store()->get(up)))) {
 			return Event::pre_process_done(Status::PARENT_NOT_FOUND, up);
 		}
@@ -126,7 +143,7 @@ CreateGraph::pre_process(PreProcessContext& ctx)
 		ext_poly = int_poly;
 	}
 
-	const Raul::Symbol symbol(_path.is_root() ? "graph" : _path.symbol());
+	const raul::Symbol symbol(_path.is_root() ? "graph" : _path.symbol());
 
 	// Get graph prototype
 	iterator t = _properties.find(uris.lv2_prototype);
@@ -152,7 +169,7 @@ CreateGraph::pre_process(PreProcessContext& ctx)
 		// Create a new graph
 		_graph = new GraphImpl(_engine, symbol, ext_poly, _parent,
 		                       _engine.sample_rate(), int_poly);
-		_graph->add_property(uris.rdf_type, uris.ingen_Graph.urid);
+		_graph->add_property(uris.rdf_type, uris.ingen_Graph.urid_atom());
 		_graph->add_property(uris.rdf_type,
 		                     Property(uris.ingen_Block,
 		                              Resource::Graph::EXTERNAL));
@@ -188,7 +205,7 @@ CreateGraph::pre_process(PreProcessContext& ctx)
 }
 
 void
-CreateGraph::execute(RunContext& context)
+CreateGraph::execute(RunContext& ctx)
 {
 	if (_graph) {
 		if (_parent) {
@@ -201,7 +218,7 @@ CreateGraph::execute(RunContext& context)
 		}
 
 		for (const auto& ev : _child_events) {
-			ev->execute(context);
+			ev->execute(ctx);
 		}
 	}
 }

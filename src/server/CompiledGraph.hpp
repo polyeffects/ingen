@@ -19,11 +19,11 @@
 
 #include "Task.hpp"
 
-#include "ingen/types.hpp"
 #include "raul/Maid.hpp"
 #include "raul/Noncopyable.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <set>
 #include <string>
 
@@ -40,16 +40,16 @@ class RunContext;
  * execute the nodes in order and have nodes always executed before any of
  * their dependencies.
  */
-class CompiledGraph : public Raul::Maid::Disposable
-                    , public Raul::Noncopyable
+class CompiledGraph : public raul::Maid::Disposable
+                    , public raul::Noncopyable
 {
 public:
-	static MPtr<CompiledGraph> compile(Raul::Maid& maid, GraphImpl& graph);
+	static raul::managed_ptr<CompiledGraph> compile(raul::Maid& maid, GraphImpl& graph);
 
-	void run(RunContext& context);
+	void run(RunContext& ctx);
 
 private:
-	friend class Raul::Maid;  ///< Allow make_managed to construct
+	friend class raul::Maid;  ///< Allow make_managed to construct
 
 	CompiledGraph(GraphImpl* graph);
 
@@ -73,7 +73,8 @@ private:
 	std::unique_ptr<Task> _master;
 };
 
-inline MPtr<CompiledGraph> compile(Raul::Maid& maid, GraphImpl& graph)
+inline raul::managed_ptr<CompiledGraph>
+compile(raul::Maid& maid, GraphImpl& graph)
 {
 	return CompiledGraph::compile(maid, graph);
 }

@@ -17,14 +17,35 @@
 #include "NewSubgraphWindow.hpp"
 
 #include "App.hpp"
-#include "GraphView.hpp"
+#include "Window.hpp"
 
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/ClientStore.hpp"
 #include "ingen/client/GraphModel.hpp"
+#include "ingen/paths.hpp"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
+
+#include <glibmm/propertyproxy.h>
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/adjustment.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/label.h>
+#include <gtkmm/spinbutton.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <utility>
 
 namespace ingen {
 namespace gui {
@@ -49,10 +70,10 @@ NewSubgraphWindow::NewSubgraphWindow(BaseObjectType*                   cobject,
 }
 
 void
-NewSubgraphWindow::present(SPtr<const client::GraphModel> graph,
-                           Properties                     data)
+NewSubgraphWindow::present(std::shared_ptr<const client::GraphModel> graph,
+                           const Properties&                         data)
 {
-	set_graph(graph);
+	set_graph(std::move(graph));
 	_initial_data = data;
 	Gtk::Window::present();
 }
@@ -62,9 +83,9 @@ NewSubgraphWindow::present(SPtr<const client::GraphModel> graph,
  * This function MUST be called before using the window in any way!
  */
 void
-NewSubgraphWindow::set_graph(SPtr<const client::GraphModel> graph)
+NewSubgraphWindow::set_graph(std::shared_ptr<const client::GraphModel> graph)
 {
-	_graph = graph;
+	_graph = std::move(graph);
 }
 
 /** Called every time the user types into the name input box.
@@ -74,10 +95,10 @@ void
 NewSubgraphWindow::name_changed()
 {
 	std::string name = _name_entry->get_text();
-	if (!Raul::Symbol::is_valid(name)) {
+	if (!raul::Symbol::is_valid(name)) {
 		_message_label->set_text("Name contains invalid characters.");
 		_ok_button->property_sensitive() = false;
-	} else if (_app->store()->find(_graph->path().child(Raul::Symbol(name)))
+	} else if (_app->store()->find(_graph->path().child(raul::Symbol(name)))
 	           != _app->store()->end()) {
 		_message_label->set_text("An object already exists with that name.");
 		_ok_button->property_sensitive() = false;
@@ -91,8 +112,8 @@ void
 NewSubgraphWindow::ok_clicked()
 {
 	const uint32_t   poly = _poly_spinbutton->get_value_as_int();
-	const Raul::Path path = _graph->path().child(
-		Raul::Symbol::symbolify(_name_entry->get_text()));
+	const raul::Path path = _graph->path().child(
+		raul::Symbol::symbolify(_name_entry->get_text()));
 
 	// Create graph
 	Properties props;

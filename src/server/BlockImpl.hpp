@@ -20,6 +20,7 @@
 #include "BufferRef.hpp"
 #include "NodeImpl.hpp"
 #include "PortType.hpp"
+#include "State.hpp"
 #include "types.hpp"
 
 #include "ingen/Node.hpp"
@@ -29,16 +30,18 @@
 #include "lilv/lilv.h"
 #include "lv2/urid/urid.h"
 #include "raul/Array.hpp"
+#include "raul/Maid.hpp"
 
 #include <boost/intrusive/slist_hook.hpp>
 #include <boost/optional/optional.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <set>
 
-namespace Raul {
+namespace raul {
 class Symbol;
-}
+} // namespace raul
 
 namespace ingen {
 namespace server {
@@ -62,15 +65,15 @@ class BlockImpl : public NodeImpl
                 , public boost::intrusive::slist_base_hook<>  // In GraphImpl
 {
 public:
-	using Ports = Raul::Array<PortImpl*>;
+	using Ports = raul::Array<PortImpl*>;
 
 	BlockImpl(PluginImpl*         plugin,
-	          const Raul::Symbol& symbol,
+	          const raul::Symbol& symbol,
 	          bool                polyphonic,
 	          GraphImpl*          parent,
 	          SampleRate          rate);
 
-	virtual ~BlockImpl();
+	~BlockImpl() override;
 
 	GraphType graph_type() const override { return GraphType::BLOCK; }
 
@@ -91,7 +94,7 @@ public:
 
 	/** Duplicate this Node. */
 	virtual BlockImpl* duplicate(Engine&             engine,
-	                             const Raul::Symbol& symbol,
+	                             const raul::Symbol& symbol,
 	                             GraphImpl*          parent) { return nullptr; }
 
 	/** Return true iff this block is activated */
@@ -104,10 +107,12 @@ public:
 	void set_enabled(bool e) { _enabled = e; }
 
 	/** Load a preset from the world for this block. */
-	virtual LilvState* load_preset(const URI& uri) { return nullptr; }
+	virtual StatePtr load_preset(const URI& uri) { return {}; }
 
 	/** Restore `state`. */
-	virtual void apply_state(const UPtr<Worker>& worker, const LilvState* state) {}
+	virtual void
+	apply_state(const std::unique_ptr<Worker>& worker, const LilvState* state)
+	{}
 
 	/** Save current state as preset. */
 	virtual boost::optional<Resource>
@@ -118,19 +123,19 @@ public:
 	virtual void learn() {}
 
 	/** Do whatever needs doing in the process thread before process() is called */
-	virtual void pre_process(RunContext& context);
+	virtual void pre_process(RunContext& ctx);
 
 	/** Run block for an entire process cycle (calls run()). */
-	virtual void process(RunContext& context);
+	virtual void process(RunContext& ctx);
 
 	/** Bypass block for an entire process cycle (called from process()). */
-	virtual void bypass(RunContext& context);
+	virtual void bypass(RunContext& ctx);
 
 	/** Run block for a portion of process cycle (called from process()). */
-	virtual void run(RunContext& context) = 0;
+	virtual void run(RunContext& ctx) = 0;
 
 	/** Do whatever needs doing in the process thread after process() is called */
-	virtual void post_process(RunContext& context);
+	virtual void post_process(RunContext& ctx);
 
 	/** Set the buffer of a port to a given buffer (e.g. connect plugin to buffer) */
 	virtual void set_port_buffer(uint32_t         voice,
@@ -145,10 +150,12 @@ public:
 	virtual PortImpl* port_by_symbol(const char* symbol);
 
 	/** Blocks that are connected to this Block's inputs. */
-	std::set<BlockImpl*>& providers() { return _providers; }
+	std::set<BlockImpl*>&       providers() { return _providers; }
+	const std::set<BlockImpl*>& providers() const { return _providers; }
 
 	/** Blocks that are connected to this Block's outputs. */
-	std::set<BlockImpl*>& dependants() { return _dependants; }
+	std::set<BlockImpl*>&       dependants() { return _dependants; }
+	const std::set<BlockImpl*>& dependants() const { return _dependants; }
 
 	/** Flag block as polyphonic.
 	 *
@@ -159,7 +166,7 @@ public:
 	virtual void set_polyphonic(bool p) { _polyphonic = p; }
 
 	bool prepare_poly(BufferFactory& bufs, uint32_t poly) override;
-	bool apply_poly(RunContext& context, uint32_t poly) override;
+	bool apply_poly(RunContext& ctx, uint32_t poly) override;
 
 	/** Information about the Plugin this Block is an instance of.
 	 * Not the best name - not all blocks come from plugins (ie Graph)
@@ -173,13 +180,16 @@ public:
 
 	virtual void plugin(PluginImpl* pi) { _plugin = pi; }
 
-	virtual void set_buffer_size(RunContext&    context,
+	virtual void set_buffer_size(RunContext&    ctx,
 	                             BufferFactory& bufs,
 	                             LV2_URID       type,
 	                             uint32_t       size);
 
 	/** The Graph this Block belongs to. */
-	GraphImpl* parent_graph() const override { return (GraphImpl*)_parent; }
+	GraphImpl* parent_graph() const override
+	{
+		return reinterpret_cast<GraphImpl*>(_parent);
+	}
 
 	uint32_t num_ports() const override { return _ports ? _ports->size() : 0; }
 
@@ -193,15 +203,15 @@ public:
 protected:
 	PortImpl* nth_port_by_type(uint32_t n, bool input, PortType type);
 
-	PluginImpl*          _plugin;
-	MPtr<Ports>          _ports; ///< Access in audio thread only
-	uint32_t             _polyphony;
-	std::set<BlockImpl*> _providers; ///< Blocks connected to this one's input ports
-	std::set<BlockImpl*> _dependants; ///< Blocks this one's output ports are connected to
-	Mark                 _mark; ///< Mark for graph compilation algorithm
-	bool                 _polyphonic;
-	bool                 _activated;
-	bool                 _enabled;
+	PluginImpl*              _plugin;
+	raul::managed_ptr<Ports> _ports; ///< Access in audio thread only
+	uint32_t                 _polyphony;
+	std::set<BlockImpl*>     _providers; ///< Blocks connected to this one's input ports
+	std::set<BlockImpl*>     _dependants; ///< Blocks this one's output ports are connected to
+	Mark                     _mark; ///< Mark for graph compilation algorithm
+	bool                     _polyphonic;
+	bool                     _activated;
+	bool                     _enabled;
 };
 
 } // namespace server

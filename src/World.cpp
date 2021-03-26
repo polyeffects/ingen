@@ -33,6 +33,7 @@
 #include "ingen/URIMap.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/ingen.h"
+#include "ingen/memory.hpp"
 #include "ingen/runtime_paths.hpp"
 #include "lilv/lilv.h"
 #include "lv2/log/log.h"
@@ -43,7 +44,6 @@
 #include <list>
 #include <map>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -72,7 +72,7 @@ ingen_load_library(Log& log, const string& name)
 		return nullptr;
 	}
 
-	UPtr<Library> library = make_unique<Library>(path);
+	std::unique_ptr<Library> library = make_unique<Library>(path);
 	if (*library) {
 		return library;
 	}
@@ -86,7 +86,7 @@ class World::Impl {
 public:
 	Impl(LV2_URID_Map*   map,
 	     LV2_URID_Unmap* unmap,
-	     LV2_Log_Log*    lv2_log)
+	     LV2_Log_Log*    log_feature)
 		: argc(nullptr)
 		, argv(nullptr)
 		, lv2_features(nullptr)
@@ -95,9 +95,8 @@ public:
 		, uri_map(log, map, unmap)
 		, forge(uri_map)
 		, uris(forge, &uri_map, lilv_world.get())
-		, lv2_log()
 		, conf(forge)
-		, log(lv2_log, uris)
+		, log(log_feature, uris)
 	{
 		lv2_features = new LV2Features();
 		lv2_features->add_feature(uri_map.urid_map_feature());
@@ -180,24 +179,23 @@ public:
 
 	using LilvWorldUPtr = std::unique_ptr<LilvWorld, decltype(&lilv_world_free)>;
 
-	int*              argc;
-	char***           argv;
-	LV2Features*      lv2_features;
-	UPtr<Sord::World> rdf_world;
-	LilvWorldUPtr     lilv_world;
-	URIMap            uri_map;
-	Forge             forge;
-	URIs              uris;
-	LV2_Log_Log*      lv2_log;
-	Configuration     conf;
-	Log               log;
-	SPtr<Interface>   interface;
-	SPtr<EngineBase>  engine;
-	SPtr<Serialiser>  serialiser;
-	SPtr<Parser>      parser;
-	SPtr<Store>       store;
-	std::mutex        rdf_mutex;
-	std::string       jack_uuid;
+	int*                         argc;
+	char***                      argv;
+	LV2Features*                 lv2_features;
+	std::unique_ptr<Sord::World> rdf_world;
+	LilvWorldUPtr                lilv_world;
+	URIMap                       uri_map;
+	Forge                        forge;
+	URIs                         uris;
+	Configuration                conf;
+	Log                          log;
+	std::shared_ptr<Interface>   interface;
+	std::shared_ptr<EngineBase>  engine;
+	std::shared_ptr<Serialiser>  serialiser;
+	std::shared_ptr<Parser>      parser;
+	std::shared_ptr<Store>       store;
+	std::mutex                   rdf_mutex;
+	std::string                  jack_uuid;
 };
 
 World::World(LV2_URID_Map* map, LV2_URID_Unmap* unmap, LV2_Log_Log* log)
@@ -230,15 +228,29 @@ World::load_configuration(int& argc, char**& argv)
 	_impl->log.set_trace(_impl->conf.option("trace").get<int32_t>());
 }
 
-void World::set_engine(const SPtr<EngineBase>& e)   { _impl->engine     = e; }
-void World::set_interface(const SPtr<Interface>& i) { _impl->interface  = i; }
-void World::set_store(const SPtr<Store>& s)         { _impl->store      = s; }
+void
+World::set_engine(const std::shared_ptr<EngineBase>& e)
+{
+	_impl->engine = e;
+}
 
-SPtr<EngineBase> World::engine()     { return _impl->engine; }
-SPtr<Interface>  World::interface()  { return _impl->interface; }
-SPtr<Parser>     World::parser()     { return _impl->parser; }
-SPtr<Serialiser> World::serialiser() { return _impl->serialiser; }
-SPtr<Store>      World::store()      { return _impl->store; }
+void
+World::set_interface(const std::shared_ptr<Interface>& i)
+{
+	_impl->interface = i;
+}
+
+void
+World::set_store(const std::shared_ptr<Store>& s)
+{
+	_impl->store = s;
+}
+
+std::shared_ptr<EngineBase> World::engine()     { return _impl->engine; }
+std::shared_ptr<Interface>  World::interface()  { return _impl->interface; }
+std::shared_ptr<Parser>     World::parser()     { return _impl->parser; }
+std::shared_ptr<Serialiser> World::serialiser() { return _impl->serialiser; }
+std::shared_ptr<Store>      World::store()      { return _impl->store; }
 
 int&           World::argc() { return *_impl->argc; }
 char**&        World::argv() { return *_impl->argv; }
@@ -264,9 +276,12 @@ World::load_module(const char* name)
 	}
 	log().info("Loading %1% module\n", name);
 	std::unique_ptr<ingen::Library> lib = ingen_load_library(log(), name);
+
 	ingen::Module* (*module_load)() =
-		lib ? (ingen::Module* (*)())lib->get_function("ingen_module_load")
-		    : nullptr;
+	    lib ? reinterpret_cast<ingen::Module* (*)()>(
+	              lib->get_function("ingen_module_load"))
+	        : nullptr;
+
 	if (module_load) {
 		Module* module = module_load();
 		if (module) {
@@ -297,14 +312,15 @@ World::run_module(const char* name)
 
 /** Get an interface for a remote engine at `engine_uri`
  */
-SPtr<Interface>
-World::new_interface(const URI& engine_uri, const SPtr<Interface>& respondee)
+std::shared_ptr<Interface>
+World::new_interface(const URI&                        engine_uri,
+                     const std::shared_ptr<Interface>& respondee)
 {
 	const Impl::InterfaceFactories::const_iterator i =
 	        _impl->interface_factories.find(std::string(engine_uri.scheme()));
 	if (i == _impl->interface_factories.end()) {
 		log().warn("Unknown URI scheme `%1%'\n", engine_uri.scheme());
-		return SPtr<Interface>();
+		return nullptr;
 	}
 
 	return i->second(*this, engine_uri, respondee);

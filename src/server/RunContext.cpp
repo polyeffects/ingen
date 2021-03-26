@@ -22,10 +22,14 @@
 #include "PortImpl.hpp"
 #include "Task.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIMap.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "lv2/urid/urid.h"
 #include "raul/RingBuffer.hpp"
 
 #include <cerrno>
@@ -54,7 +58,7 @@ struct Notification
 };
 
 RunContext::RunContext(Engine&           engine,
-                       Raul::RingBuffer* event_sink,
+                       raul::RingBuffer* event_sink,
                        unsigned          id,
                        bool              threaded)
 	: _engine(engine)
@@ -124,8 +128,7 @@ RunContext::emit_notifications(FrameTime end)
 			return;
 		}
 		if (_event_sink->read(sizeof(note), &note) == sizeof(note)) {
-			Atom value = _engine.world().forge().alloc(
-				note.size, note.type, nullptr);
+			Atom value = Forge::alloc(note.size, note.type, nullptr);
 			if (_event_sink->read(note.size, value.get_body()) == note.size) {
 				i += note.size;
 				const char* key = _engine.world().uri_map().unmap_uri(note.key);
@@ -195,7 +198,7 @@ void
 RunContext::run()
 {
 	while (_engine.wait_for_tasks()) {
-		for (Task* t; (t = _engine.steal_task(0));) {
+		for (Task* t = nullptr; (t = _engine.steal_task(0));) {
 			t->run(*this);
 		}
 	}

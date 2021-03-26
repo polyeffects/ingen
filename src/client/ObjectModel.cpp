@@ -16,18 +16,23 @@
 
 #include "ingen/client/ObjectModel.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Node.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
 #include "ingen/URIs.hpp"
+#include "ingen/paths.hpp"
 
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 
 namespace ingen {
 namespace client {
 
-ObjectModel::ObjectModel(URIs& uris, const Raul::Path& path)
+ObjectModel::ObjectModel(URIs& uris, const raul::Path& path)
 	: Node(uris, path)
 	, _path(path)
 	, _symbol((path == "/") ? "root" : path.symbol())
@@ -81,30 +86,30 @@ ObjectModel::polyphonic() const
  * `o` as correct.  The paths of the two models MUST be equal.
  */
 void
-ObjectModel::set(const SPtr<ObjectModel>& o)
+ObjectModel::set(const std::shared_ptr<ObjectModel>& o)
 {
 	assert(_path == o->path());
 	if (o->_parent) {
 		_parent = o->_parent;
 	}
 
-	for (auto v : o->properties()) {
+	for (const auto& v : o->properties()) {
 		Resource::set_property(v.first, v.second);
 		_signal_property.emit(v.first, v.second);
 	}
 }
 
 void
-ObjectModel::set_path(const Raul::Path& p)
+ObjectModel::set_path(const raul::Path& p)
 {
 	_path   = p;
-	_symbol = Raul::Symbol(p.is_root() ? "root" : p.symbol());
+	_symbol = raul::Symbol(p.is_root() ? "root" : p.symbol());
 	set_uri(path_to_uri(p));
 	_signal_moved.emit();
 }
 
 void
-ObjectModel::set_parent(const SPtr<ObjectModel>& p)
+ObjectModel::set_parent(const std::shared_ptr<ObjectModel>& p)
 {
 	assert(_path.is_child_of(p->path()));
 	_parent = p;

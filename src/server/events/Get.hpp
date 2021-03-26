@@ -17,18 +17,26 @@
 #ifndef INGEN_EVENTS_GET_HPP
 #define INGEN_EVENTS_GET_HPP
 
+#include "ingen/Message.hpp"
+
 #include "BlockFactory.hpp"
 #include "ClientUpdate.hpp"
 #include "Event.hpp"
 #include "types.hpp"
 
+#include <memory>
+
 namespace ingen {
+
+class Interface;
+class Node;
+
 namespace server {
 
-class BlockImpl;
-class GraphImpl;
+class Engine;
 class PluginImpl;
-class PortImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -39,13 +47,13 @@ namespace events {
 class Get : public Event
 {
 public:
-	Get(Engine&                engine,
-	    const SPtr<Interface>& client,
-	    SampleCount            timestamp,
-	    const ingen::Get&      msg);
+	Get(Engine&                           engine,
+	    const std::shared_ptr<Interface>& client,
+	    SampleCount                       timestamp,
+	    const ingen::Get&                 msg);
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override {}
+	void execute(RunContext&) override;
 	void post_process() override;
 
 private:

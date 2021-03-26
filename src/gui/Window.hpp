@@ -17,6 +17,7 @@
 #ifndef INGEN_GUI_WINDOW_HPP
 #define INGEN_GUI_WINDOW_HPP
 
+#include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
 #include <gtkmm/dialog.h>
 #include <gtkmm/window.h>
@@ -33,13 +34,17 @@ class App;
 class Window : public Gtk::Window
 {
 public:
-	Window()                                 : Gtk::Window(), _app(nullptr)        {}
-	explicit Window(BaseObjectType* cobject) : Gtk::Window(cobject), _app(nullptr) {}
+	Window() = default;
+
+	explicit Window(BaseObjectType* cobject)
+	    : Gtk::Window(cobject)
+	{
+	}
 
 	virtual void init_window(App& app) { _app = &app; }
 
 	bool on_key_press_event(GdkEventKey* event) override {
-		if (event->keyval == GDK_w && event->state & GDK_CONTROL_MASK) {
+		if (event->keyval == GDK_KEY_w && event->state & GDK_CONTROL_MASK) {
 			hide();
 			return true;
 		}
@@ -48,7 +53,7 @@ public:
 
 	static bool key_press_handler(Gtk::Window* win, GdkEventKey* event);
 
-	App* _app;
+	App* _app = nullptr;
 };
 
 /** Ingen GUI Dialog
@@ -57,20 +62,24 @@ public:
 class Dialog : public Gtk::Dialog
 {
 public:
-	Dialog()                                 : Gtk::Dialog(), _app(nullptr)        {}
-	explicit Dialog(BaseObjectType* cobject) : Gtk::Dialog(cobject), _app(nullptr) {}
+	Dialog() = default;
+
+	explicit Dialog(BaseObjectType* cobject)
+	    : Gtk::Dialog(cobject)
+	{
+	}
 
 	virtual void init_dialog(App& app) { _app = &app; }
 
 	bool on_key_press_event(GdkEventKey* event) override {
-		if (event->keyval == GDK_w && event->state & GDK_CONTROL_MASK) {
+		if (event->keyval == GDK_KEY_w && event->state & GDK_CONTROL_MASK) {
 			hide();
 			return true;
 		}
 		return Gtk::Window::on_key_press_event(event);
 	}
 
-	App* _app;
+	App* _app = nullptr;
 };
 
 } // namespace gui

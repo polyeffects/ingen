@@ -16,19 +16,27 @@
 
 #include "events/Disconnect.hpp"
 
-#include "ArcImpl.hpp"
+#include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
 #include "Buffer.hpp"
-#include "DuplexPort.hpp"
+#include "BufferFactory.hpp"
+#include "BufferRef.hpp"
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "InputPort.hpp"
 #include "PortImpl.hpp"
+#include "PortType.hpp"
 #include "PreProcessContext.hpp"
-#include "RunContext.hpp"
 #include "ThreadManager.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/memory.hpp"
+#include "raul/Array.hpp"
 #include "raul/Maid.hpp"
 #include "raul/Path.hpp"
 
@@ -41,17 +49,22 @@
 
 namespace ingen {
 namespace server {
+
+class RunContext;
+
 namespace events {
 
-Disconnect::Disconnect(Engine&                  engine,
-                       const SPtr<Interface>&   client,
-                       SampleCount              timestamp,
-                       const ingen::Disconnect& msg)
+Disconnect::Disconnect(Engine&                           engine,
+                       const std::shared_ptr<Interface>& client,
+                       SampleCount                       timestamp,
+                       const ingen::Disconnect&          msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _msg(msg)
 	, _graph(nullptr)
 {
 }
+
+Disconnect::~Disconnect() = default;
 
 Disconnect::Impl::Impl(Engine&     e,
                        GraphImpl*  graph,
@@ -165,22 +178,22 @@ Disconnect::pre_process(PreProcessContext& ctx)
 }
 
 bool
-Disconnect::Impl::execute(RunContext& context, bool set_head_buffers)
+Disconnect::Impl::execute(RunContext& ctx, bool set_head_buffers)
 {
 	if (!_arc) {
 		return false;
 	}
 
-	_head->remove_arc(*_arc.get());
+	_head->remove_arc(*_arc);
 	if (_head->is_driver_port()) {
 		return true;
 	}
 
 	if (set_head_buffers) {
 		if (_voices) {
-			_head->set_voices(context, std::move(_voices));
+			_head->set_voices(ctx, std::move(_voices));
 		} else {
-			_head->setup_buffers(context, *_engine.buffer_factory(), _head->poly());
+			_head->setup_buffers(ctx, *_engine.buffer_factory(), _head->poly());
 		}
 		_head->connect_buffers();
 	} else {
@@ -191,10 +204,10 @@ Disconnect::Impl::execute(RunContext& context, bool set_head_buffers)
 }
 
 void
-Disconnect::execute(RunContext& context)
+Disconnect::execute(RunContext& ctx)
 {
 	if (_status == Status::SUCCESS) {
-		if (_impl->execute(context, true)) {
+		if (_impl->execute(ctx, true)) {
 			if (_compiled_graph) {
 				_graph->set_compiled_graph(std::move(_compiled_graph));
 			}

@@ -14,8 +14,8 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "JackDriver.hpp"
 #include "Engine.hpp"
+#include "JackDriver.hpp"
 
 #include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
@@ -23,35 +23,45 @@
 #include "ingen/Module.hpp"
 #include "ingen/World.hpp"
 
+#include <memory>
 #include <string>
 
-using namespace ingen;
+namespace ingen {
+namespace server {
 
-struct IngenJackModule : public ingen::Module {
-	void load(ingen::World& world) override {
-		if (((server::Engine*)world.engine().get())->driver()) {
+class Driver;
+
+struct JackModule : public Module {
+	void load(World& world) override {
+		server::Engine* const engine =
+		    static_cast<server::Engine*>(world.engine().get());
+
+		if (engine->driver()) {
 			world.log().warn("Engine already has a driver\n");
 			return;
 		}
 
-		server::JackDriver* driver = new server::JackDriver(
-			*(server::Engine*)world.engine().get());
-		const Atom& s = world.conf().option("jack-server");
+		auto*             driver      = new server::JackDriver(*engine);
+		const Atom&       s           = world.conf().option("jack-server");
 		const std::string server_name = s.is_valid() ? s.ptr<char>() : "";
+
 		driver->attach(server_name,
 		               world.conf().option("jack-name").ptr<char>(),
 		               nullptr);
-		((server::Engine*)world.engine().get())->set_driver(
-			SPtr<server::Driver>(driver));
+
+		engine->set_driver(std::shared_ptr<server::Driver>(driver));
 	}
 };
+
+} // namespace server
+} // namespace ingen
 
 extern "C" {
 
 ingen::Module*
 ingen_module_load()
 {
-	return new IngenJackModule();
+	return new ingen::server::JackModule();
 }
 
 } // extern "C"

@@ -15,35 +15,60 @@
 */
 
 #include "App.hpp"
-#include "GraphCanvas.hpp"
-#include "GraphView.hpp"
-#include "GraphWindow.hpp"
 #include "LoadPluginWindow.hpp"
-#include "ingen_config.h"
+#include "Window.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/ClientStore.hpp"
 #include "ingen/client/GraphModel.hpp"
+#include "ingen/client/PluginModel.hpp"
+#include "ingen/paths.hpp"
+#include "lilv/lilv.h"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
-#include <string>
-#include <cstddef>
-#include <cassert>
+#include <gdk/gdkkeysyms-compat.h>
+#include <glibmm/listhandle.h>
+#include <glibmm/propertyproxy.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/combobox.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/messagedialog.h>
+#include <gtkmm/treeiter.h>
+#include <gtkmm/treeview.h>
+#include <gtkmm/treeviewcolumn.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
+
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <utility>
 
 using std::string;
 
 namespace ingen {
 
-using namespace client;
+using client::ClientStore;
+using client::GraphModel;
+using client::PluginModel;
 
 namespace gui {
 
 LoadPluginWindow::LoadPluginWindow(BaseObjectType*                   cobject,
                                    const Glib::RefPtr<Gtk::Builder>& xml)
 	: Window(cobject)
-	, _name_offset(0)
-	, _has_shown(false)
-	, _refresh_list(true)
 {
 	xml->get_widget("load_plugin_plugins_treeview", _plugins_treeview);
 	xml->get_widget("load_plugin_polyphonic_checkbutton", _polyphonic_checkbutton);
@@ -125,8 +150,8 @@ LoadPluginWindow::LoadPluginWindow(BaseObjectType*                   cobject,
 }
 
 void
-LoadPluginWindow::present(SPtr<const GraphModel> graph,
-                          Properties             data)
+LoadPluginWindow::present(const std::shared_ptr<const GraphModel>& graph,
+                          const Properties&                        data)
 {
 	set_graph(graph);
 	_initial_data = data;
@@ -142,9 +167,9 @@ LoadPluginWindow::name_changed()
 	// Toggle add button sensitivity according name legality
 	if (_selection->get_selected_rows().size() == 1) {
 		const string sym = _name_entry->get_text();
-		if (!Raul::Symbol::is_valid(sym)) {
+		if (!raul::Symbol::is_valid(sym)) {
 			_add_button->property_sensitive() = false;
-		} else if (_app->store()->find(_graph->path().child(Raul::Symbol(sym)))
+		} else if (_app->store()->find(_graph->path().child(raul::Symbol(sym)))
 		           != _app->store()->end()) {
 			_add_button->property_sensitive() = false;
 		} else {
@@ -164,7 +189,7 @@ LoadPluginWindow::name_cleared(Gtk::EntryIconPosition pos, const GdkEventButton*
  * This function MUST be called before using the window in any way!
  */
 void
-LoadPluginWindow::set_graph(SPtr<const GraphModel> graph)
+LoadPluginWindow::set_graph(const std::shared_ptr<const GraphModel>& graph)
 {
 	if (_graph) {
 		_graph = graph;
@@ -199,12 +224,13 @@ LoadPluginWindow::on_show()
 }
 
 void
-LoadPluginWindow::set_plugins(SPtr<const ClientStore::Plugins> plugins)
+LoadPluginWindow::set_plugins(
+    const std::shared_ptr<const ClientStore::Plugins>& plugins)
 {
 	_rows.clear();
 	_plugins_liststore->clear();
 
-	for (const auto& p : *plugins.get()) {
+	for (const auto& p : *plugins) {
 		add_plugin(p.second);
 	}
 
@@ -213,7 +239,7 @@ LoadPluginWindow::set_plugins(SPtr<const ClientStore::Plugins> plugins)
 }
 
 void
-LoadPluginWindow::new_plugin(SPtr<const PluginModel> pm)
+LoadPluginWindow::new_plugin(const std::shared_ptr<const PluginModel>& pm)
 {
 	if (is_visible()) {
 		add_plugin(pm);
@@ -223,7 +249,7 @@ LoadPluginWindow::new_plugin(SPtr<const PluginModel> pm)
 }
 
 static std::string
-get_project_name(SPtr<const PluginModel> plugin)
+get_project_name(const std::shared_ptr<const PluginModel>& plugin)
 {
 	std::string name;
 	if (plugin->lilv_plugin()) {
@@ -249,7 +275,7 @@ get_project_name(SPtr<const PluginModel> plugin)
 }
 
 static std::string
-get_author_name(SPtr<const PluginModel> plugin)
+get_author_name(const std::shared_ptr<const PluginModel>& plugin)
 {
 	std::string name;
 	if (plugin->lilv_plugin()) {
@@ -263,8 +289,8 @@ get_author_name(SPtr<const PluginModel> plugin)
 }
 
 void
-LoadPluginWindow::set_row(Gtk::TreeModel::Row&    row,
-                          SPtr<const PluginModel> plugin)
+LoadPluginWindow::set_row(Gtk::TreeModel::Row&                      row,
+                          const std::shared_ptr<const PluginModel>& plugin)
 {
 	const URIs&       uris = _app->uris();
 	const Atom& name = plugin->get_property(uris.doap_name);
@@ -294,7 +320,7 @@ LoadPluginWindow::set_row(Gtk::TreeModel::Row&    row,
 }
 
 void
-LoadPluginWindow::add_plugin(SPtr<const PluginModel> plugin)
+LoadPluginWindow::add_plugin(const std::shared_ptr<const PluginModel>& plugin)
 {
 	if (plugin->lilv_plugin() && lilv_plugin_is_replaced(plugin->lilv_plugin())) {
 		return;
@@ -333,8 +359,7 @@ LoadPluginWindow::plugin_selection_changed()
 			*_selection->get_selected_rows().begin());
 		if (iter) {
 			Gtk::TreeModel::Row row = *iter;
-			SPtr<const PluginModel> p = row.get_value(
-				_plugins_columns._col_plugin);
+			auto                p = row.get_value(_plugins_columns._col_plugin);
 			_name_offset = _app->store()->child_name_offset(
 				_graph->path(), p->default_block_symbol());
 			_name_entry->set_text(generate_module_name(p, _name_offset));
@@ -357,8 +382,9 @@ LoadPluginWindow::plugin_selection_changed()
  * sends the notification back.
  */
 string
-LoadPluginWindow::generate_module_name(SPtr<const PluginModel> plugin,
-                                       int                     offset)
+LoadPluginWindow::generate_module_name(
+    const std::shared_ptr<const PluginModel>& plugin,
+    int                                       offset)
 {
 	std::stringstream ss;
 	ss << plugin->default_block_symbol();
@@ -371,17 +397,17 @@ LoadPluginWindow::generate_module_name(SPtr<const PluginModel> plugin,
 void
 LoadPluginWindow::load_plugin(const Gtk::TreeModel::iterator& iter)
 {
-	const URIs&             uris       = _app->uris();
-	Gtk::TreeModel::Row     row        = *iter;
-	SPtr<const PluginModel> plugin     = row.get_value(_plugins_columns._col_plugin);
-	bool                    polyphonic = _polyphonic_checkbutton->get_active();
-	string                  name       = _name_entry->get_text();
+	const URIs&         uris       = _app->uris();
+	Gtk::TreeModel::Row row        = *iter;
+	auto                plugin     = row.get_value(_plugins_columns._col_plugin);
+	bool                polyphonic = _polyphonic_checkbutton->get_active();
+	string              name       = _name_entry->get_text();
 
 	if (name.empty()) {
 		name = generate_module_name(plugin, _name_offset);
 	}
 
-	if (name.empty() || !Raul::Symbol::is_valid(name)) {
+	if (name.empty() || !raul::Symbol::is_valid(name)) {
 		Gtk::MessageDialog dialog(
 			*this,
 			"Unable to choose a default name, please provide one",
@@ -389,7 +415,7 @@ LoadPluginWindow::load_plugin(const Gtk::TreeModel::iterator& iter)
 
 		dialog.run();
 	} else {
-		Raul::Path path  = _graph->path().child(Raul::Symbol::symbolify(name));
+		raul::Path path  = _graph->path().child(raul::Symbol::symbolify(name));
 		Properties props = _initial_data;
 		props.emplace(uris.rdf_type, Property(uris.ingen_Block));
 		props.emplace(uris.lv2_prototype, _app->forge().make_urid(plugin->uri()));
@@ -435,9 +461,9 @@ LoadPluginWindow::filter_changed()
 	size_t                   num_visible = 0;
 	const URIs&              uris        = _app->uris();
 
-	for (const auto& p : *_app->store()->plugins().get()) {
-		const SPtr<PluginModel> plugin = p.second;
-		const Atom& name = plugin->get_property(uris.doap_name);
+	for (const auto& p : *_app->store()->plugins()) {
+		const auto  plugin = p.second;
+		const Atom& name   = plugin->get_property(uris.doap_name);
 
 		switch (criteria) {
 		case CriteriaColumns::Criteria::NAME:

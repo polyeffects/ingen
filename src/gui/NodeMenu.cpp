@@ -17,31 +17,52 @@
 #include "NodeMenu.hpp"
 
 #include "App.hpp"
-#include "WidgetFactory.hpp"
-#include "WindowFactory.hpp"
+#include "ObjectMenu.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
-#include "ingen/Log.hpp"
-#include "ingen/URIMap.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/BlockModel.hpp"
+#include "ingen/client/ObjectModel.hpp"
 #include "ingen/client/PluginModel.hpp"
 #include "ingen/client/PortModel.hpp"
-#include "lv2/presets/presets.h"
+#include "raul/Symbol.hpp"
 
 #include <glib.h>
+#include <glibmm/convert.h>
+#include <glibmm/miscutils.h>
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/box.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/checkmenuitem.h>
+#include <gtkmm/dialog.h>
 #include <gtkmm/entry.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/filechooser.h>
 #include <gtkmm/filechooserdialog.h>
 #include <gtkmm/image.h>
+#include <gtkmm/label.h>
+#include <gtkmm/menu_elems.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/menushell.h>
+#include <gtkmm/object.h>
+#include <gtkmm/separatormenuitem.h>
 #include <gtkmm/stock.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ingen {
-
-using namespace client;
-
 namespace gui {
 
 NodeMenu::NodeMenu(BaseObjectType*                   cobject,
@@ -56,7 +77,7 @@ NodeMenu::NodeMenu(BaseObjectType*                   cobject,
 }
 
 void
-NodeMenu::init(App& app, SPtr<const client::BlockModel> block)
+NodeMenu::init(App& app, const std::shared_ptr<const client::BlockModel>& block)
 {
 	ObjectMenu::init(app, block);
 
@@ -71,7 +92,7 @@ NodeMenu::init(App& app, SPtr<const client::BlockModel> block)
 	_randomize_menuitem->signal_activate().connect(
 		sigc::mem_fun(this, &NodeMenu::on_menu_randomize));
 
-	SPtr<PluginModel> plugin = block->plugin_model();
+	auto plugin = block->plugin_model();
 	if (plugin) {
 		// Get the plugin to receive related presets
 		_preset_connection = plugin->signal_preset().connect(
@@ -172,12 +193,15 @@ NodeMenu::on_menu_randomize()
 {
 	_app->interface()->bundle_begin();
 
-	const SPtr<const BlockModel> bm = block();
+	const auto bm = block();
 	for (const auto& p : bm->ports()) {
 		if (p->is_input() && _app->can_control(p.get())) {
-			float min = 0.0f, max = 1.0f;
+			float min = 0.0f;
+			float max = 1.0f;
 			bm->port_value_range(p, min, max, _app->sample_rate());
-			const float val = g_random_double_range(0.0, 1.0) * (max - min) + min;
+
+			const auto r = static_cast<float>(g_random_double_range(0.0, 1.0));
+			const float val = r * (max - min) + min;
 			_app->set_property(p->uri(),
 			                   _app->uris().ingen_value,
 			                   _app->forge().make(val));
@@ -215,9 +239,9 @@ NodeMenu::on_save_preset_activated()
 		const std::string user_path = Glib::filename_from_uri(user_uri);
 		const std::string dirname   = Glib::path_get_dirname(user_path);
 		const std::string basename  = Glib::path_get_basename(user_path);
-		const std::string sym       = Raul::Symbol::symbolify(basename);
+		const std::string sym       = raul::Symbol::symbolify(basename);
 		const std::string plugname  = block()->plugin_model()->human_name();
-		const std::string prefix    = Raul::Symbol::symbolify(plugname);
+		const std::string prefix    = raul::Symbol::symbolify(plugname);
 		const std::string bundle    = prefix + "_" + sym + ".preset.lv2/";
 		const std::string file      = sym + ".ttl";
 		const std::string real_path = Glib::build_filename(dirname, bundle, file);

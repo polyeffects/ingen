@@ -17,16 +17,28 @@
 #ifndef INGEN_EVENTS_DISCONNECT_HPP
 #define INGEN_EVENTS_DISCONNECT_HPP
 
-#include "CompiledGraph.hpp"
 #include "Event.hpp"
 #include "PortImpl.hpp"
 #include "types.hpp"
 
+#include "ingen/Message.hpp"
+#include "raul/Maid.hpp"
+
+#include <memory>
+
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
 class ArcImpl;
+class CompiledGraph;
+class Engine;
+class GraphImpl;
 class InputPort;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -37,13 +49,15 @@ namespace events {
 class Disconnect : public Event
 {
 public:
-	Disconnect(Engine&                  engine,
-	           const SPtr<Interface>&   client,
-	           SampleCount              timestamp,
-	           const ingen::Disconnect& msg);
+	Disconnect(Engine&                           engine,
+	           const std::shared_ptr<Interface>& client,
+	           SampleCount                       timestamp,
+	           const ingen::Disconnect&          msg);
+
+	~Disconnect() override;
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
@@ -51,24 +65,24 @@ public:
 	public:
 		Impl(Engine& e, GraphImpl* graph, PortImpl* t, InputPort* h);
 
-		bool execute(RunContext& context, bool set_head_buffers);
+		bool execute(RunContext& ctx, bool set_head_buffers);
 
 		inline PortImpl*  tail() { return _tail; }
 		inline InputPort* head() { return _head; }
 
 	private:
-		Engine&                _engine;
-		PortImpl*              _tail;
-		InputPort*             _head;
-		SPtr<ArcImpl>          _arc;
-		MPtr<PortImpl::Voices> _voices;
+		Engine&                             _engine;
+		PortImpl*                           _tail;
+		InputPort*                          _head;
+		std::shared_ptr<ArcImpl>            _arc;
+		raul::managed_ptr<PortImpl::Voices> _voices;
 	};
 
 private:
-	const ingen::Disconnect _msg;
-	GraphImpl*              _graph;
-	UPtr<Impl>              _impl;
-	MPtr<CompiledGraph>     _compiled_graph;
+	const ingen::Disconnect          _msg;
+	GraphImpl*                       _graph;
+	std::unique_ptr<Impl>            _impl;
+	raul::managed_ptr<CompiledGraph> _compiled_graph;
 };
 
 } // namespace events

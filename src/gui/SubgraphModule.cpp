@@ -18,27 +18,30 @@
 
 #include "App.hpp"
 #include "NodeModule.hpp"
-#include "GraphCanvas.hpp"
-#include "GraphWindow.hpp"
-#include "Port.hpp"
 #include "WindowFactory.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/client/BlockModel.hpp"
 #include "ingen/client/GraphModel.hpp"
 
 #include <cassert>
-#include <utility>
+#include <memory>
 
 namespace ingen {
 
-using namespace client;
+using client::GraphModel;
 
 namespace gui {
 
-SubgraphModule::SubgraphModule(GraphCanvas&           canvas,
-                               SPtr<const GraphModel> graph)
-	: NodeModule(canvas, graph)
-	, _graph(graph)
+class GraphWindow;
+
+SubgraphModule::SubgraphModule(GraphCanvas&                             canvas,
+                               const std::shared_ptr<const GraphModel>& graph)
+    : NodeModule(canvas, graph), _graph(graph)
 {
 	assert(graph);
 }
@@ -48,7 +51,7 @@ SubgraphModule::on_double_click(GdkEventButton* event)
 {
 	assert(_graph);
 
-	SPtr<GraphModel> parent = dynamic_ptr_cast<GraphModel>(_graph->parent());
+	auto parent = std::dynamic_pointer_cast<GraphModel>(_graph->parent());
 
 	GraphWindow* const preferred = ( (parent && (event->state & GDK_SHIFT_MASK))
 	                                 ? nullptr
@@ -84,7 +87,7 @@ SubgraphModule::browse_to_graph()
 {
 	assert(_graph->parent());
 
-	SPtr<GraphModel> parent = dynamic_ptr_cast<GraphModel>(_graph->parent());
+	auto parent = std::dynamic_pointer_cast<GraphModel>(_graph->parent());
 
 	GraphWindow* const preferred = (parent)
 		? app().window_factory()->graph_window(parent)

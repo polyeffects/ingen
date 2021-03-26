@@ -18,74 +18,80 @@
 
 #include "ConnectWindow.hpp"
 #include "GraphTreeWindow.hpp"
-#include "GraphWindow.hpp"
-#include "LoadPluginWindow.hpp"
 #include "MessagesWindow.hpp"
-#include "NodeModule.hpp"
 #include "Port.hpp"
 #include "RDFS.hpp"
 #include "Style.hpp"
-#include "SubgraphModule.hpp"
 #include "ThreadedLoader.hpp"
 #include "WidgetFactory.hpp"
 #include "WindowFactory.hpp"
 #include "rgba.hpp"
 
-#include "ganv/Edge.hpp"
+#include "ingen/Atom.hpp"
+#include "ingen/ColorContext.hpp"
 #include "ingen/Configuration.hpp"
 #include "ingen/EngineBase.hpp"
+#include "ingen/FilePath.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
 #include "ingen/QueuedInterface.hpp"
 #include "ingen/StreamWriter.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
 #include "ingen/client/ClientStore.hpp"
-#include "ingen/client/GraphModel.hpp"
-#include "ingen/client/ObjectModel.hpp"
+#include "ingen/client/PluginModel.hpp"
 #include "ingen/client/PortModel.hpp"
 #include "ingen/client/SigClientInterface.hpp"
 #include "ingen/runtime_paths.hpp"
 #include "lilv/lilv.h"
-#include "raul/Path.hpp"
 #include "suil/suil.h"
 
 #include <boost/variant/get.hpp>
-#include <gtk/gtkwindow.h>
+#include <glib.h>
+#include <glibmm/main.h>
+#include <glibmm/miscutils.h>
+#include <glibmm/propertyproxy.h>
+#include <gtk/gtk.h>
+#include <gtkmm/aboutdialog.h>
+#include <gtkmm/dialog.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/main.h>
+#include <gtkmm/messagedialog.h>
+#include <gtkmm/rc.h>
 #include <gtkmm/stock.h>
+#include <gtkmm/widget.h>
+#include <sigc++/functors/mem_fun.h>
 
+#include <algorithm>
 #include <cassert>
-#include <fstream>
+#include <cstdio>
+#include <exception>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
-namespace Raul { class Deletable; }
-
 namespace ingen {
-
-namespace client { class PluginModel; }
-
-using namespace client;
-
 namespace gui {
-
-class Port;
 
 Gtk::Main* App::_main = nullptr;
 
 App::App(ingen::World& world)
-	: _style(new Style(*this))
-	, _about_dialog(nullptr)
-	, _window_factory(new WindowFactory(*this))
-	, _world(world)
-	, _sample_rate(48000)
-	, _block_length(1024)
-	, _n_threads(1)
-	, _mean_run_load(0.0f)
-	, _min_run_load(0.0f)
-	, _max_run_load(0.0f)
-	, _enable_signal(true)
-	, _requested_plugins(false)
-	, _is_plugin(false)
+    : _style(new Style(*this))
+    , _window_factory(new WindowFactory(*this))
+    , _world(world)
+    , _sample_rate(48000)
+    , _block_length(1024)
+    , _n_threads(1)
+    , _mean_run_load(0.0f)
+    , _min_run_load(0.0f)
+    , _max_run_load(0.0f)
+    , _enable_signal(true)
+    , _requested_plugins(false)
+    , _is_plugin(false)
 {
 	_world.conf().load_default("ingen", "gui.ttl");
 
@@ -99,11 +105,14 @@ App::App(ingen::World& world)
 	_about_dialog->property_program_name() = "Ingen";
 	_about_dialog->property_logo_icon_name() = "ingen";
 
-	PluginModel::set_rdf_world(*world.rdf_world());
-	PluginModel::set_lilv_world(world.lilv_world());
+	client::PluginModel::set_rdf_world(*world.rdf_world());
+	client::PluginModel::set_lilv_world(world.lilv_world());
 
-	using namespace std::placeholders;
-	world.log().set_sink(std::bind(&MessagesWindow::log, _messages_window, _1, _2, _3));
+	world.log().set_sink(std::bind(&MessagesWindow::log,
+	                               _messages_window,
+	                               std::placeholders::_1,
+	                               std::placeholders::_2,
+	                               std::placeholders::_3));
 }
 
 App::~App()
@@ -112,7 +121,7 @@ App::~App()
 	delete _window_factory;
 }
 
-SPtr<App>
+std::shared_ptr<App>
 App::create(ingen::World& world)
 {
 	suil_init(&world.argc(), &world.argv(), SUIL_ARG_NONE);
@@ -128,7 +137,7 @@ App::create(ingen::World& world)
 		_main = new Gtk::Main(&world.argc(), &world.argv());
 	}
 
-	auto app = SPtr<App>{new App(world)};
+	auto app = std::shared_ptr<App>(new App(world));
 
 	// Load configuration settings
 	app->style()->load_settings();
@@ -151,16 +160,16 @@ App::run()
 	// with 'ingen -egl' we'd get a bunch of notifications about load
 	// immediately before even knowing about the root graph or plugins)
 	while (!_connect_window->attached()) {
-		if (_main->iteration()) {
+		if (Gtk::Main::iteration()) {
 			break;
 		}
 	}
 
-	_main->run();
+	Gtk::Main::run();
 }
 
 void
-App::attach(SPtr<ingen::Interface> client)
+App::attach(const std::shared_ptr<ingen::Interface>& client)
 {
 	assert(!_client);
 	assert(!_store);
@@ -171,21 +180,26 @@ App::attach(SPtr<ingen::Interface> client)
 	}
 
 	_client = client;
-	_store  = SPtr<ClientStore>(new ClientStore(_world.uris(), _world.log(), sig_client()));
-	_loader = SPtr<ThreadedLoader>(new ThreadedLoader(*this, _world.interface()));
+
+	_store = std::make_shared<client::ClientStore>(_world.uris(),
+	                                               _world.log(),
+	                                               sig_client());
+
+	_loader = std::make_shared<ThreadedLoader>(*this, _world.interface());
+
 	if (!_world.store()) {
 		_world.set_store(_store);
 	}
 
 	if (_world.conf().option("dump").get<int32_t>()) {
-		_dumper = SPtr<StreamWriter>(new StreamWriter(_world.uri_map(),
-		                                              _world.uris(),
-		                                              URI("ingen:/client"),
-		                                              stderr,
-		                                              ColorContext::Color::CYAN));
+		_dumper = std::make_shared<StreamWriter>(_world.uri_map(),
+		                                         _world.uris(),
+		                                         URI("ingen:/client"),
+		                                         stderr,
+		                                         ColorContext::Color::CYAN);
 
 		sig_client()->signal_message().connect(
-			sigc::mem_fun(*_dumper.get(), &StreamWriter::message));
+			sigc::mem_fun(*_dumper, &StreamWriter::message));
 	}
 
 	_graph_tree_window->init(*this, *_store);
@@ -202,7 +216,7 @@ App::detach()
 		_loader.reset();
 		_store.reset();
 		_client.reset();
-		_world.set_interface(SPtr<Interface>());
+		_world.set_interface(nullptr);
 	}
 }
 
@@ -215,17 +229,17 @@ App::request_plugins_if_necessary()
 	}
 }
 
-SPtr<SigClientInterface>
+std::shared_ptr<client::SigClientInterface>
 App::sig_client()
 {
-	SPtr<QueuedInterface> qi = dynamic_ptr_cast<QueuedInterface>(_client);
+	auto qi = std::dynamic_pointer_cast<QueuedInterface>(_client);
 	if (qi) {
-		return dynamic_ptr_cast<SigClientInterface>(qi->sink());
+		return std::dynamic_pointer_cast<client::SigClientInterface>(qi->sink());
 	}
-	return dynamic_ptr_cast<SigClientInterface>(_client);
+	return std::dynamic_pointer_cast<client::SigClientInterface>(_client);
 }
 
-SPtr<Serialiser>
+std::shared_ptr<Serialiser>
 App::serialiser()
 {
 	return _world.serialiser();
@@ -354,7 +368,7 @@ App::status_text() const
 	return fmt(
 		"%2.1f kHz / %.1f ms, %s, %s DSP",
 		(_sample_rate / 1e3f),
-		(_block_length * 1e3f / (float)_sample_rate),
+		(_block_length * 1e3f / static_cast<float>(_sample_rate)),
 		((_n_threads == 1) ? "1 thread" : fmt("%1% threads", _n_threads)),
 		fraction_label(_max_run_load));
 }
@@ -428,7 +442,7 @@ App::gtk_main_iteration()
 			return false;
 		}
 	} else {
-		dynamic_ptr_cast<QueuedInterface>(_client)->emit();
+		std::dynamic_pointer_cast<QueuedInterface>(_client)->emit();
 	}
 	_enable_signal = true;
 

@@ -52,7 +52,7 @@ public:
 	/** Process events for a cycle.
 	 * @return The number of events processed.
 	 */
-	unsigned process(RunContext&    context,
+	unsigned process(RunContext&    ctx,
 	                 PostProcessor& dest,
 	                 size_t         limit = 0);
 
@@ -76,7 +76,7 @@ private:
 
 	Engine&                 _engine;
 	std::mutex              _mutex;
-	Raul::Semaphore         _sem;
+	raul::Semaphore         _sem;
 	std::atomic<Event*>     _head;
 	std::atomic<Event*>     _tail;
 	std::atomic<BlockState> _block_state;

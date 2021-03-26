@@ -18,27 +18,56 @@
 #include "PropertiesWindow.hpp"
 #include "RDFS.hpp"
 #include "URIEntry.hpp"
+#include "Window.hpp"
 
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Properties.hpp"
 #include "ingen/URIMap.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
-#include "ingen/client/BlockModel.hpp"
-#include "ingen/client/PluginModel.hpp"
+#include "ingen/client/ObjectModel.hpp"
+#include "lilv/lilv.h"
+#include "lv2/urid/urid.h"
+#include "raul/Path.hpp"
+#include "sord/sordmm.hpp"
 
+#include <glibmm/containers.h>
+#include <glibmm/propertyproxy.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/alignment.h>
+#include <gtkmm/bin.h>
+#include <gtkmm/box.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/combobox.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/enums.h>
 #include <gtkmm/label.h>
+#include <gtkmm/object.h>
+#include <gtkmm/scrolledwindow.h>
 #include <gtkmm/spinbutton.h>
+#include <gtkmm/table.h>
+#include <gtkmm/treeiter.h>
+#include <gtkmm/widget.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
 
 #include <algorithm>
 #include <cfloat>
 #include <climits>
 #include <cstdint>
+#include <memory>
 #include <set>
 #include <utility>
 
 namespace ingen {
 
-using namespace client;
+using client::ObjectModel;
 
 namespace gui {
 
@@ -96,7 +125,7 @@ PropertiesWindow::reset()
 }
 
 void
-PropertiesWindow::present(SPtr<const ObjectModel> model)
+PropertiesWindow::present(const std::shared_ptr<const ObjectModel>& model)
 {
 	set_object(model);
 	Gtk::Window::present();
@@ -116,10 +145,12 @@ PropertiesWindow::add_property(const URI& key, const Atom& value)
 	if (name.empty()) {
 		name = world.rdf_world()->prefixes().qualify(key);
 	}
-	Gtk::Label* label = new Gtk::Label(
-	        std::string("<a href=\"") + key.string() + "\">" + name + "</a>",
-	        1.0,
-	        0.5);
+
+	auto* label = new Gtk::Label(std::string("<a href=\"") + key.string() +
+	                                 "\">" + name + "</a>",
+	                             1.0,
+	                             0.5);
+
 	label->set_use_markup(true);
 	_app->set_tooltip(label, prop);
 	_table->attach(*Gtk::manage(label), 0, 1, n_rows, n_rows + 1,
@@ -200,7 +231,7 @@ PropertiesWindow::class_supported(const rdfs::URISet& types)
  * This function MUST be called before using this object in any way.
  */
 void
-PropertiesWindow::set_object(SPtr<const ObjectModel> model)
+PropertiesWindow::set_object(const std::shared_ptr<const ObjectModel>& model)
 {
 	reset();
 	_model = model;
@@ -305,10 +336,10 @@ PropertiesWindow::create_value_widget(const URI&  key,
 		Gtk::SpinButton* widget = manage(new Gtk::SpinButton(0.0, 4));
 		widget->property_numeric() = true;
 		widget->set_snap_to_ticks(false);
-		widget->set_range(-FLT_MAX, FLT_MAX);
+		widget->set_range(-DBL_MAX, DBL_MAX);
 		widget->set_increments(0.1, 1.0);
 		if (value.is_valid()) {
-			widget->set_value(value.get<float>());
+			widget->set_value(static_cast<double>(value.get<float>()));
 		}
 		widget->signal_value_changed().connect(
 			sigc::bind(sigc::mem_fun(this, &PropertiesWindow::on_change), key));
@@ -437,29 +468,29 @@ PropertiesWindow::get_value(LV2_URID type, Gtk::Widget* value_widget)
 	Forge& forge = _app->forge();
 
 	if (type == forge.Int) {
-		Gtk::SpinButton* spin = dynamic_cast<Gtk::SpinButton*>(value_widget);
+		auto* spin = dynamic_cast<Gtk::SpinButton*>(value_widget);
 		if (spin) {
 			return _app->forge().make(spin->get_value_as_int());
 		}
 	} else if (type == forge.Float) {
-		Gtk::SpinButton* spin = dynamic_cast<Gtk::SpinButton*>(value_widget);
+		auto* spin = dynamic_cast<Gtk::SpinButton*>(value_widget);
 		if (spin) {
 			return _app->forge().make(static_cast<float>(spin->get_value()));
 		}
 	} else if (type == forge.Bool) {
-		Gtk::CheckButton* check = dynamic_cast<Gtk::CheckButton*>(value_widget);
+		auto* check = dynamic_cast<Gtk::CheckButton*>(value_widget);
 		if (check) {
 			return _app->forge().make(check->get_active());
 		}
 	} else if (type == forge.URI || type == forge.URID) {
-		URIEntry* uri_entry = dynamic_cast<URIEntry*>(value_widget);
+		auto* uri_entry = dynamic_cast<URIEntry*>(value_widget);
 		if (uri_entry && URI::is_valid(uri_entry->get_text())) {
 			return _app->forge().make_urid(URI(uri_entry->get_text()));
 		} else {
 			_app->log().error("Invalid URI <%1%>\n", uri_entry->get_text());
 		}
 	} else if (type == forge.String) {
-		Gtk::Entry* entry = dynamic_cast<Gtk::Entry*>(value_widget);
+		auto* entry = dynamic_cast<Gtk::Entry*>(value_widget);
 		if (entry) {
 			return _app->forge().alloc(entry->get_text());
 		}

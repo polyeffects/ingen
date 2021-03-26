@@ -14,8 +14,6 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#define __STDC_LIMIT_MACROS 1
-
 #include "Buffer.hpp"
 
 #include "BufferFactory.hpp"
@@ -28,10 +26,10 @@
 #include "ingen_config.h"
 #include "lv2/atom/atom.h"
 #include "lv2/atom/util.h"
+#include "lv2/urid/urid.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -102,12 +100,12 @@ Buffer::recycle()
 }
 
 void
-Buffer::set_type(GetFn get, LV2_URID type, LV2_URID value_type)
+Buffer::set_type(GetFn get_func, LV2_URID type, LV2_URID value_type)
 {
 	_type       = type;
 	_value_type = value_type;
 	if (type == _factory.uris().atom_Sequence && value_type) {
-		_value_buffer = (_factory.*get)(value_type, 0, 0);
+		_value_buffer = (_factory.*get_func)(value_type, 0, 0);
 	}
 }
 
@@ -129,26 +127,26 @@ Buffer::clear()
 }
 
 void
-Buffer::render_sequence(const RunContext& context, const Buffer* src, bool add)
+Buffer::render_sequence(const RunContext& ctx, const Buffer* src, bool add)
 {
 	const LV2_URID atom_Float = _factory.uris().atom_Float;
 	const auto*    seq        = src->get<const LV2_Atom_Sequence>();
-	const auto*    init       = (const LV2_Atom_Float*)src->value();
+	const auto*    init       = reinterpret_cast<const LV2_Atom_Float*>(src->value());
 	float          value      = init ? init->body : 0.0f;
-	SampleCount    offset     = context.offset();
+	SampleCount    offset     = ctx.offset();
 
 	LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
 		if (ev->time.frames >= offset && ev->body.type == atom_Float) {
 			write_block(value, offset, ev->time.frames, add);
-			value  = ((const LV2_Atom_Float*)&ev->body)->body;
+			value  = reinterpret_cast<const LV2_Atom_Float*>(&ev->body)->body;
 			offset = ev->time.frames;
 		}
 	}
-	write_block(value, offset, context.offset() + context.nframes(), add);
+	write_block(value, offset, ctx.offset() + ctx.nframes(), add);
 }
 
 void
-Buffer::copy(const RunContext& context, const Buffer* src)
+Buffer::copy(const RunContext& ctx, const Buffer* src)
 {
 	if (!_buf) {
 		return;
@@ -162,10 +160,10 @@ Buffer::copy(const RunContext& context, const Buffer* src)
 	} else if (src->is_audio() && is_control()) {
 		samples()[0] = src->samples()[0];
 	} else if (src->is_control() && is_audio()) {
-		set_block(src->samples()[0], 0, context.nframes());
+		set_block(src->samples()[0], 0, ctx.nframes());
 	} else if (src->is_sequence() && is_audio() &&
 	           src->value_type() == _factory.uris().atom_Float) {
-		render_sequence(context, src, false);
+		render_sequence(ctx, src, false);
 	} else {
 		clear();
 	}
@@ -194,14 +192,16 @@ Buffer::port_data(PortType port_type, SampleCount offset)
 		if (_type == _factory.uris().atom_Float) {
 			return &get<LV2_Atom_Float>()->body;
 		} else if (_type == _factory.uris().atom_Sound) {
-			return (Sample*)_buf + offset;
+			return static_cast<Sample*>(_buf) + offset;
 		}
 		break;
 	case PortType::ID::ATOM:
 		if (_type != _factory.uris().atom_Sound) {
 			return _buf;
 		}
-	default: break;
+		break;
+	default:
+		break;
 	}
 	return nullptr;
 }
@@ -224,12 +224,12 @@ mm_abs_ps(__m128 x)
 #endif
 
 float
-Buffer::peak(const RunContext& context) const
+Buffer::peak(const RunContext& ctx) const
 {
 #ifdef __SSE__
-	const auto* const vbuf    = (const __m128*)samples();
+	const auto* const vbuf    = reinterpret_cast<const __m128*>(samples());
 	__m128            vpeak   = mm_abs_ps(vbuf[0]);
-	const SampleCount nblocks = context.nframes() / 4;
+	const SampleCount nblocks = ctx.nframes() / 4;
 
 	// First, find the vector absolute max of the buffer
 	for (SampleCount i = 1; i < nblocks; ++i) {
@@ -252,7 +252,7 @@ Buffer::peak(const RunContext& context) const
 	vpeak = _mm_max_ps(vpeak, tmp);
 
 	// peak = vpeak[0]
-	float peak;
+	float peak = 0.0f;
 	_mm_store_ss(&peak, vpeak);
 
 	return peak;
@@ -272,7 +272,7 @@ Buffer::prepare_write(RunContext&)
 	if (_type == _factory.uris().atom_Sequence) {
 		auto* atom = get<LV2_Atom>();
 
-		atom->type    = (LV2_URID)_factory.uris().atom_Sequence;
+		atom->type    = static_cast<LV2_URID>(_factory.uris().atom_Sequence);
 		atom->size    = sizeof(LV2_Atom_Sequence_Body);
 		_latest_event = 0;
 	}
@@ -284,7 +284,7 @@ Buffer::prepare_output_write(RunContext&)
 	if (_type == _factory.uris().atom_Sequence) {
 		auto* atom = get<LV2_Atom>();
 
-		atom->type    = (LV2_URID)_factory.uris().atom_Chunk;
+		atom->type    = static_cast<LV2_URID>(_factory.uris().atom_Chunk);
 		atom->size    = _capacity - sizeof(LV2_Atom);
 		_latest_event = 0;
 	}
@@ -307,9 +307,9 @@ Buffer::append_event(int64_t        frames,
 		return false;
 	}
 
-	auto* seq = (LV2_Atom_Sequence*)atom;
-	auto* ev  = (LV2_Atom_Event*)(
-		(uint8_t*)seq + lv2_atom_total_size(&seq->atom));
+	auto* seq = reinterpret_cast<LV2_Atom_Sequence*>(atom);
+	auto* ev  = reinterpret_cast<LV2_Atom_Event*>(
+        reinterpret_cast<uint8_t*>(seq) + lv2_atom_total_size(&seq->atom));
 
 	ev->time.frames = frames;
 	ev->body.size   = size;
@@ -326,20 +326,25 @@ Buffer::append_event(int64_t        frames,
 bool
 Buffer::append_event(int64_t frames, const LV2_Atom* body)
 {
-	return append_event(frames, body->size, body->type, (const uint8_t*)(body + 1));
+	return append_event(frames,
+	                    body->size,
+	                    body->type,
+	                    reinterpret_cast<const uint8_t*>(body + 1));
 }
 
 bool
 Buffer::append_event_buffer(const Buffer* buf)
 {
-	auto* seq  = (LV2_Atom_Sequence*)get<LV2_Atom>();
-	auto* bseq = (LV2_Atom_Sequence*)buf->get<LV2_Atom>();
+	auto*       seq = reinterpret_cast<LV2_Atom_Sequence*>(get<LV2_Atom>());
+	const auto* bseq =
+	    reinterpret_cast<const LV2_Atom_Sequence*>(buf->get<LV2_Atom>());
+
 	if (seq->atom.type == _factory.uris().atom_Chunk) {
 		clear();  // Chunk initialized with prepare_output_write(), clear
 	}
 
 	const uint32_t total_size = lv2_atom_total_size(&seq->atom);
-	uint8_t* const end        = (uint8_t*)seq + total_size;
+	uint8_t* const end        = reinterpret_cast<uint8_t*>(seq) + total_size;
 	const uint32_t n_bytes    = bseq->atom.size - sizeof(bseq->body);
 	if (sizeof(LV2_Atom) + total_size + n_bytes >= _capacity) {
 		return false;  // Not enough space
@@ -426,27 +431,11 @@ Buffer::update_value_buffer(SampleCount offset)
 	}
 }
 
-#ifndef NDEBUG
-void
-Buffer::dump_cv(const RunContext& context) const
-{
-	float value = samples()[0];
-	fprintf(stderr, "{ 0000: %.02f\n", value);
-	for (uint32_t i = 0; i < context.nframes(); ++i) {
-		if (samples()[i] != value) {
-			value = samples()[i];
-			fprintf(stderr, "  %4d: %.02f\n", i, value);
-		}
-	}
-	fprintf(stderr, "}\n");
-}
-#endif
-
 void* Buffer::aligned_alloc(size_t size)
 {
 #ifdef HAVE_POSIX_MEMALIGN
-	void* buf;
-	if (!posix_memalign((void**)&buf, 16, size)) {
+	void* buf = nullptr;
+	if (!posix_memalign(static_cast<void**>(&buf), 16, size)) {
 		memset(buf, 0, size);
 		return buf;
 	}

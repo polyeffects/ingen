@@ -16,25 +16,42 @@
 
 #include "Delta.hpp"
 
+#include "BlockFactory.hpp"
+#include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
+#include "CompiledGraph.hpp"
 #include "ControlBindings.hpp"
 #include "CreateBlock.hpp"
 #include "CreateGraph.hpp"
 #include "CreatePort.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
+#include "NodeImpl.hpp"
 #include "PluginImpl.hpp"
 #include "PortImpl.hpp"
 #include "PortType.hpp"
 #include "SetPortValue.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/FilePath.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Message.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/memory.hpp"
+#include "ingen/paths.hpp"
+#include "lilv/lilv.h"
 #include "raul/Maid.hpp"
+#include "raul/Path.hpp"
 
+#include <algorithm>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -48,10 +65,10 @@ class PreProcessContext;
 
 namespace events {
 
-Delta::Delta(Engine&                engine,
-             const SPtr<Interface>& client,
-             SampleCount            timestamp,
-             const ingen::Put&      msg)
+Delta::Delta(Engine&                           engine,
+             const std::shared_ptr<Interface>& client,
+             SampleCount                       timestamp,
+             const ingen::Put&                 msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _create_event(nullptr)
 	, _subject(msg.uri)
@@ -59,7 +76,7 @@ Delta::Delta(Engine&                engine,
 	, _object(nullptr)
 	, _graph(nullptr)
 	, _binding(nullptr)
-	, _state(nullptr)
+	, _state()
 	, _context(msg.ctx)
 	, _type(Type::PUT)
 	, _block(false)
@@ -67,10 +84,10 @@ Delta::Delta(Engine&                engine,
 	init();
 }
 
-Delta::Delta(Engine&                engine,
-             const SPtr<Interface>& client,
-             SampleCount            timestamp,
-             const ingen::Delta&    msg)
+Delta::Delta(Engine&                           engine,
+             const std::shared_ptr<Interface>& client,
+             SampleCount                       timestamp,
+             const ingen::Delta&               msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _create_event(nullptr)
 	, _subject(msg.uri)
@@ -87,10 +104,10 @@ Delta::Delta(Engine&                engine,
 	init();
 }
 
-Delta::Delta(Engine&                   engine,
-             const SPtr<Interface>&    client,
-             SampleCount               timestamp,
-             const ingen::SetProperty& msg)
+Delta::Delta(Engine&                           engine,
+             const std::shared_ptr<Interface>& client,
+             SampleCount                       timestamp,
+             const ingen::SetProperty&         msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _subject(msg.subject)
 	, _properties{{msg.predicate, msg.value}}
@@ -148,7 +165,7 @@ s_add_set_event(const char* port_symbol,
                 uint32_t    size,
                 uint32_t    type)
 {
-	((Delta*)user_data)->add_set_event(port_symbol, value, size, type);
+	static_cast<Delta*>(user_data)->add_set_event(port_symbol, value, size, type);
 }
 
 static LilvNode*
@@ -223,7 +240,7 @@ Delta::pre_process(PreProcessContext& ctx)
 	}
 
 	if (is_graph_object && !_object) {
-		Raul::Path path(uri_to_path(_subject));
+		raul::Path path(uri_to_path(_subject));
 
 		bool is_graph  = false;
 		bool is_block  = false;
@@ -377,8 +394,9 @@ Delta::pre_process(PreProcessContext& ctx)
 					if (!uri.empty()) {
 						op = SpecialType::PRESET;
 						if ((_state = block->load_preset(uri))) {
-							lilv_state_emit_port_values(
-								_state, s_add_set_event, this);
+							lilv_state_emit_port_values(_state.get(),
+							                            s_add_set_event,
+							                            this);
 						} else {
 							_engine.log().warn("Failed to load preset <%1%>\n", uri);
 						}
@@ -423,9 +441,8 @@ Delta::pre_process(PreProcessContext& ctx)
 				} else if (value.type() != uris.forge.Bool) {
 					_status = Status::BAD_VALUE_TYPE;
 				} else {
-					op     = SpecialType::POLYPHONIC;
+					op = SpecialType::POLYPHONIC;
 					obj->set_property(key, value, value.context());
-					auto* block = dynamic_cast<BlockImpl*>(obj);
 					if (block) {
 						block->set_polyphonic(value.get<int32_t>());
 					}
@@ -446,9 +463,9 @@ Delta::pre_process(PreProcessContext& ctx)
 				lilv_world_load_bundle(lworld, bundle);
 				const auto new_plugins = _engine.block_factory()->refresh();
 
-				for (const auto& p : new_plugins) {
-					if (p->bundle_uri() == lilv_node_as_string(bundle)) {
-						_update.put_plugin(p.get());
+				for (const auto& plugin : new_plugins) {
+					if (plugin->bundle_uri() == lilv_node_as_string(bundle)) {
+						_update.put_plugin(plugin.get());
 					}
 				}
 				lilv_node_free(bundle);
@@ -474,7 +491,7 @@ Delta::pre_process(PreProcessContext& ctx)
 }
 
 void
-Delta::execute(RunContext& context)
+Delta::execute(RunContext& ctx)
 {
 	if (_status != Status::SUCCESS || _preset) {
 		return;
@@ -484,16 +501,16 @@ Delta::execute(RunContext& context)
 
 	if (_create_event) {
 		_create_event->set_time(_time);
-		_create_event->execute(context);
+		_create_event->execute(ctx);
 	}
 
 	for (auto& s : _set_events) {
 		s->set_time(_time);
-		s->execute(context);
+		s->execute(ctx);
 	}
 
 	if (!_removed_bindings.empty()) {
-		_engine.control_bindings()->remove(context, _removed_bindings);
+		_engine.control_bindings()->remove(ctx, _removed_bindings);
 	}
 
 	auto* const object = dynamic_cast<NodeImpl*>(_object);
@@ -518,7 +535,7 @@ Delta::execute(RunContext& context)
 					}
 					_graph->enable();
 				} else {
-					_graph->disable(context);
+					_graph->disable(ctx);
 				}
 			} else if (block) {
 				block->set_enabled(value.get<int32_t>());
@@ -528,15 +545,15 @@ Delta::execute(RunContext& context)
 			if (object) {
 				if (value.get<int32_t>()) {
 					auto* parent = reinterpret_cast<GraphImpl*>(object->parent());
-					object->apply_poly(context, parent->internal_poly_process());
+					object->apply_poly(ctx, parent->internal_poly_process());
 				} else {
-					object->apply_poly(context, 1);
+					object->apply_poly(ctx, 1);
 				}
 			}
 		} break;
 		case SpecialType::POLYPHONY:
 			if (_graph &&
-			    !_graph->apply_internal_poly(context,
+			    !_graph->apply_internal_poly(ctx,
 			                                 *_engine.buffer_factory(),
 			                                 *_engine.maid(),
 			                                 value.get<int32_t>())) {
@@ -545,12 +562,12 @@ Delta::execute(RunContext& context)
 			break;
 		case SpecialType::PORT_INDEX:
 			if (port) {
-				port->set_index(context, value.get<int32_t>());
+				port->set_index(ctx, value.get<int32_t>());
 			}
 			break;
 		case SpecialType::CONTROL_BINDING:
 			if (port) {
-				if (!_engine.control_bindings()->set_port_binding(context, port, _binding, value)) {
+				if (!_engine.control_bindings()->set_port_binding(ctx, port, _binding, value)) {
 					_status = Status::BAD_VALUE;
 				}
 			} else if (block) {
@@ -572,6 +589,7 @@ Delta::execute(RunContext& context)
 					port->set_maximum(value);
 				}
 			}
+			break;
 		case SpecialType::LOADED_BUNDLE:
 			break;
 		}
@@ -584,10 +602,11 @@ Delta::post_process()
 	if (_state) {
 		auto* block = dynamic_cast<BlockImpl*>(_object);
 		if (block) {
-			block->apply_state(_engine.sync_worker(), _state);
+			block->apply_state(_engine.sync_worker(), _state.get());
 			block->set_enabled(true);
 		}
-		lilv_state_free(_state);
+
+		_state.reset();
 	}
 
 	Broadcaster::Transfer t(*_engine.broadcaster());

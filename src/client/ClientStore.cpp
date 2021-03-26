@@ -16,7 +16,13 @@
 
 #include "ingen/client/ClientStore.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/ArcModel.hpp"
 #include "ingen/client/BlockModel.hpp"
 #include "ingen/client/GraphModel.hpp"
@@ -24,20 +30,24 @@
 #include "ingen/client/PluginModel.hpp"
 #include "ingen/client/PortModel.hpp"
 #include "ingen/client/SigClientInterface.hpp"
+#include "ingen/paths.hpp"
+#include "raul/Path.hpp"
 
 #include <boost/variant/apply_visitor.hpp>
+#include <sigc++/functors/mem_fun.h>
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
 namespace ingen {
 namespace client {
 
-ClientStore::ClientStore(URIs&                    uris,
-                         Log&                     log,
-                         SPtr<SigClientInterface> emitter)
+ClientStore::ClientStore(URIs&                                      uris,
+                         Log&                                       log,
+                         const std::shared_ptr<SigClientInterface>& emitter)
 	: _uris(uris)
 	, _log(log)
 	, _emitter(emitter)
@@ -57,16 +67,16 @@ ClientStore::clear()
 }
 
 void
-ClientStore::add_object(SPtr<ObjectModel> object)
+ClientStore::add_object(const std::shared_ptr<ObjectModel>& object)
 {
 	// If we already have "this" object, merge the existing one into the new
 	// one (with precedence to the new values).
 	auto existing = find(object->path());
 	if (existing != end()) {
-		dynamic_ptr_cast<ObjectModel>(existing->second)->set(object);
+		std::dynamic_pointer_cast<ObjectModel>(existing->second)->set(object);
 	} else {
 		if (!object->path().is_root()) {
-			SPtr<ObjectModel> parent = _object(object->path().parent());
+			std::shared_ptr<ObjectModel> parent = _object(object->path().parent());
 			if (parent) {
 				assert(object->path().is_child_of(parent->path()));
 				object->set_parent(parent);
@@ -84,26 +94,26 @@ ClientStore::add_object(SPtr<ObjectModel> object)
 		}
 	}
 
-	for (auto p : object->properties()) {
+	for (const auto& p : object->properties()) {
 		object->signal_property().emit(p.first, p.second);
 	}
 }
 
-SPtr<ObjectModel>
-ClientStore::remove_object(const Raul::Path& path)
+std::shared_ptr<ObjectModel>
+ClientStore::remove_object(const raul::Path& path)
 {
 	// Find the object, the "top" of the tree to remove
 	const iterator top = find(path);
 	if (top == end()) {
-		return SPtr<ObjectModel>();
+		return nullptr;
 	}
 
-	SPtr<ObjectModel> object = dynamic_ptr_cast<ObjectModel>(top->second);
+	auto object = std::dynamic_pointer_cast<ObjectModel>(top->second);
 
 	// Remove object and any adjacent arcs from parent if applicable
 	if (object && object->parent()) {
-		SPtr<PortModel> port = dynamic_ptr_cast<PortModel>(object);
-		if (port && dynamic_ptr_cast<GraphModel>(port->parent())) {
+		auto port = std::dynamic_pointer_cast<PortModel>(object);
+		if (port && std::dynamic_pointer_cast<GraphModel>(port->parent())) {
 			disconnect_all(port->parent()->path(), path);
 			if (port->parent()->parent()) {
 				disconnect_all(port->parent()->parent()->path(), path);
@@ -129,50 +139,50 @@ ClientStore::remove_object(const Raul::Path& path)
 	return object;
 }
 
-SPtr<PluginModel>
+std::shared_ptr<PluginModel>
 ClientStore::_plugin(const URI& uri)
 {
 	const Plugins::iterator i = _plugins->find(uri);
-	return (i == _plugins->end()) ? SPtr<PluginModel>() : (*i).second;
+	return (i == _plugins->end()) ? std::shared_ptr<PluginModel>() : (*i).second;
 }
 
-SPtr<PluginModel>
+std::shared_ptr<PluginModel>
 ClientStore::_plugin(const Atom& uri)
 {
 	/* FIXME: Should probably be stored with URIs rather than strings, to make
 	   this a fast case. */
 
 	const Plugins::iterator i = _plugins->find(URI(_uris.forge.str(uri, false)));
-	return (i == _plugins->end()) ? SPtr<PluginModel>() : (*i).second;
+	return (i == _plugins->end()) ? std::shared_ptr<PluginModel>() : (*i).second;
 }
 
-SPtr<const PluginModel>
+std::shared_ptr<const PluginModel>
 ClientStore::plugin(const URI& uri) const
 {
 	return const_cast<ClientStore*>(this)->_plugin(uri);
 }
 
-SPtr<ObjectModel>
-ClientStore::_object(const Raul::Path& path)
+std::shared_ptr<ObjectModel>
+ClientStore::_object(const raul::Path& path)
 {
 	const iterator i = find(path);
 	if (i == end()) {
-		return SPtr<ObjectModel>();
+		return nullptr;
 	} else {
-		SPtr<ObjectModel> model = dynamic_ptr_cast<ObjectModel>(i->second);
+		auto model = std::dynamic_pointer_cast<ObjectModel>(i->second);
 		assert(model);
 		assert(model->path().is_root() || model->parent());
 		return model;
 	}
 }
 
-SPtr<const ObjectModel>
-ClientStore::object(const Raul::Path& path) const
+std::shared_ptr<const ObjectModel>
+ClientStore::object(const raul::Path& path) const
 {
 	return const_cast<ClientStore*>(this)->_object(path);
 }
 
-SPtr<Resource>
+std::shared_ptr<Resource>
 ClientStore::_resource(const URI& uri)
 {
 	if (uri_is_path(uri)) {
@@ -182,16 +192,16 @@ ClientStore::_resource(const URI& uri)
 	}
 }
 
-SPtr<const Resource>
+std::shared_ptr<const Resource>
 ClientStore::resource(const URI& uri) const
 {
 	return const_cast<ClientStore*>(this)->_resource(uri);
 }
 
 void
-ClientStore::add_plugin(SPtr<PluginModel> pm)
+ClientStore::add_plugin(const std::shared_ptr<PluginModel>& pm)
 {
-	SPtr<PluginModel> existing = _plugin(pm->uri());
+	std::shared_ptr<PluginModel> existing = _plugin(pm->uri());
 	if (existing) {
 		existing->set(pm);
 	} else {
@@ -245,7 +255,10 @@ ClientStore::operator()(const Put& msg)
 	const auto& uri        = msg.uri;
 	const auto& properties = msg.properties;
 
-	bool is_graph, is_block, is_port, is_output;
+	bool is_block  = false;
+	bool is_graph  = false;
+	bool is_output = false;
+	bool is_port   = false;
 	Resource::type(uris(), properties,
 	               is_graph, is_block, is_port, is_output);
 
@@ -254,9 +267,9 @@ ClientStore::operator()(const Put& msg)
 	if (t != properties.end()) {
 		const Atom& type(t->second);
 		if (_uris.pset_Preset == type) {
-			const Iterator    p = properties.find(_uris.lv2_appliesTo);
-			const Iterator    l = properties.find(_uris.rdfs_label);
-			SPtr<PluginModel> plug;
+			const Iterator p = properties.find(_uris.lv2_appliesTo);
+			const Iterator l = properties.find(_uris.rdfs_label);
+			std::shared_ptr<PluginModel> plug;
 			if (p == properties.end()) {
 				_log.error("Preset <%1%> with no plugin\n", uri.c_str());
 			} else if (l == properties.end()) {
@@ -273,7 +286,7 @@ ClientStore::operator()(const Put& msg)
 		} else if (_uris.ingen_Graph == type) {
 			is_graph = true;
 		} else if (_uris.ingen_Internal == type || _uris.lv2_Plugin == type) {
-			SPtr<PluginModel> p(new PluginModel(uris(), uri, type, properties));
+			std::shared_ptr<PluginModel> p(new PluginModel(uris(), uri, type, properties));
 			add_plugin(p);
 			return;
 		}
@@ -284,9 +297,9 @@ ClientStore::operator()(const Put& msg)
 		return;
 	}
 
-	const Raul::Path path(uri_to_path(uri));
+	const raul::Path path(uri_to_path(uri));
 
-	SPtr<ObjectModel> obj = dynamic_ptr_cast<ObjectModel>(_object(path));
+	auto obj = std::dynamic_pointer_cast<ObjectModel>(_object(path));
 	if (obj) {
 		obj->set_properties(properties);
 		return;
@@ -297,7 +310,7 @@ ClientStore::operator()(const Put& msg)
 	}
 
 	if (is_graph) {
-		SPtr<GraphModel> model(new GraphModel(uris(), path));
+		std::shared_ptr<GraphModel> model(new GraphModel(uris(), path));
 		model->set_properties(properties);
 		add_object(model);
 	} else if (is_block) {
@@ -306,17 +319,19 @@ ClientStore::operator()(const Put& msg)
 			p = properties.find(_uris.ingen_prototype);
 		}
 
-		SPtr<PluginModel> plug;
+		std::shared_ptr<PluginModel> plug;
 		if (p->second.is_valid() && (p->second.type() == _uris.forge.URI ||
 		                             p->second.type() == _uris.forge.URID)) {
-			const URI uri(_uris.forge.str(p->second, false));
-			if (!(plug = _plugin(uri))) {
-				plug = SPtr<PluginModel>(
-					new PluginModel(uris(), uri, Atom(), Properties()));
+			const URI plugin_uri(_uris.forge.str(p->second, false));
+			if (!(plug = _plugin(plugin_uri))) {
+				plug = std::make_shared<PluginModel>(uris(),
+				                                     plugin_uri,
+				                                     Atom(),
+				                                     Properties());
 				add_plugin(plug);
 			}
 
-			SPtr<BlockModel> bm(new BlockModel(uris(), plug, path));
+			std::shared_ptr<BlockModel> bm(new BlockModel(uris(), plug, path));
 			bm->set_properties(properties);
 			add_object(bm);
 		} else {
@@ -332,7 +347,7 @@ ClientStore::operator()(const Put& msg)
 			index = i->second.get<int32_t>();
 		}
 
-		SPtr<PortModel> p(new PortModel(uris(), path, index, pdir));
+		std::shared_ptr<PortModel> p(new PortModel(uris(), path, index, pdir));
 		p->set_properties(properties);
 		add_object(p);
 	} else {
@@ -354,9 +369,9 @@ ClientStore::operator()(const Delta& msg)
 		return;
 	}
 
-	const Raul::Path path(uri_to_path(uri));
+	const raul::Path path(uri_to_path(uri));
 
-	SPtr<ObjectModel> obj = _object(path);
+	std::shared_ptr<ObjectModel> obj = _object(path);
 	if (obj) {
 		obj->remove_properties(msg.remove);
 		obj->add_properties(msg.add);
@@ -377,7 +392,7 @@ ClientStore::operator()(const SetProperty& msg)
 		          predicate.c_str(), _uris.forge.str(value, false));
 		return;
 	}
-	SPtr<Resource> subject = _resource(subject_uri);
+	std::shared_ptr<Resource> subject = _resource(subject_uri);
 	if (subject) {
 		if (predicate == _uris.ingen_activity) {
 			/* Activity is transient, trigger any live actions (like GUI
@@ -387,7 +402,7 @@ ClientStore::operator()(const SetProperty& msg)
 			subject->set_property(predicate, value, msg.ctx);
 		}
 	} else {
-		SPtr<PluginModel> plugin = _plugin(subject_uri);
+		std::shared_ptr<PluginModel> plugin = _plugin(subject_uri);
 		if (plugin) {
 			plugin->set_property(predicate, value);
 		} else if (predicate != _uris.ingen_activity) {
@@ -397,26 +412,26 @@ ClientStore::operator()(const SetProperty& msg)
 	}
 }
 
-SPtr<GraphModel>
-ClientStore::connection_graph(const Raul::Path& tail_path,
-                              const Raul::Path& head_path)
+std::shared_ptr<GraphModel>
+ClientStore::connection_graph(const raul::Path& tail_path,
+                              const raul::Path& head_path)
 {
-	SPtr<GraphModel> graph;
+	std::shared_ptr<GraphModel> graph;
 
 	if (tail_path.parent() == head_path.parent()) {
-		graph = dynamic_ptr_cast<GraphModel>(_object(tail_path.parent()));
+		graph = std::dynamic_pointer_cast<GraphModel>(_object(tail_path.parent()));
 	}
 
 	if (!graph && tail_path.parent() == head_path.parent().parent()) {
-		graph = dynamic_ptr_cast<GraphModel>(_object(tail_path.parent()));
+		graph = std::dynamic_pointer_cast<GraphModel>(_object(tail_path.parent()));
 	}
 
 	if (!graph && tail_path.parent().parent() == head_path.parent()) {
-		graph = dynamic_ptr_cast<GraphModel>(_object(head_path.parent()));
+		graph = std::dynamic_pointer_cast<GraphModel>(_object(head_path.parent()));
 	}
 
 	if (!graph) {
-		graph = dynamic_ptr_cast<GraphModel>(_object(tail_path.parent().parent()));
+		graph = std::dynamic_pointer_cast<GraphModel>(_object(tail_path.parent().parent()));
 	}
 
 	if (!graph) {
@@ -428,15 +443,15 @@ ClientStore::connection_graph(const Raul::Path& tail_path,
 }
 
 bool
-ClientStore::attempt_connection(const Raul::Path& tail_path,
-                                const Raul::Path& head_path)
+ClientStore::attempt_connection(const raul::Path& tail_path,
+                                const raul::Path& head_path)
 {
-	SPtr<PortModel> tail = dynamic_ptr_cast<PortModel>(_object(tail_path));
-	SPtr<PortModel> head = dynamic_ptr_cast<PortModel>(_object(head_path));
+	auto tail = std::dynamic_pointer_cast<PortModel>(_object(tail_path));
+	auto head = std::dynamic_pointer_cast<PortModel>(_object(head_path));
 
 	if (tail && head) {
-		SPtr<GraphModel> graph = connection_graph(tail_path, head_path);
-		SPtr<ArcModel>   arc(new ArcModel(tail, head));
+		std::shared_ptr<GraphModel> graph = connection_graph(tail_path, head_path);
+		std::shared_ptr<ArcModel>   arc(new ArcModel(tail, head));
 		graph->add_arc(arc);
 		return true;
 	} else {
@@ -454,9 +469,9 @@ ClientStore::operator()(const Connect& msg)
 void
 ClientStore::operator()(const Disconnect& msg)
 {
-	SPtr<PortModel>  tail  = dynamic_ptr_cast<PortModel>(_object(msg.tail));
-	SPtr<PortModel>  head  = dynamic_ptr_cast<PortModel>(_object(msg.head));
-	SPtr<GraphModel> graph = connection_graph(msg.tail, msg.head);
+	auto tail  = std::dynamic_pointer_cast<PortModel>(_object(msg.tail));
+	auto head  = std::dynamic_pointer_cast<PortModel>(_object(msg.head));
+	auto graph = connection_graph(msg.tail, msg.head);
 	if (graph) {
 		graph->remove_arc(tail.get(), head.get());
 	}
@@ -465,8 +480,8 @@ ClientStore::operator()(const Disconnect& msg)
 void
 ClientStore::operator()(const DisconnectAll& msg)
 {
-	SPtr<GraphModel>  graph  = dynamic_ptr_cast<GraphModel>(_object(msg.graph));
-	SPtr<ObjectModel> object = _object(msg.path);
+	auto graph  = std::dynamic_pointer_cast<GraphModel>(_object(msg.graph));
+	auto object = _object(msg.path);
 
 	if (!graph || !object) {
 		_log.error("Bad disconnect all notification %1% in %2%\n",
@@ -475,8 +490,8 @@ ClientStore::operator()(const DisconnectAll& msg)
 	}
 
 	const GraphModel::Arcs arcs = graph->arcs();
-	for (auto a : arcs) {
-		SPtr<ArcModel> arc = dynamic_ptr_cast<ArcModel>(a.second);
+	for (const auto& a : arcs) {
+		auto arc = std::dynamic_pointer_cast<ArcModel>(a.second);
 		if (arc->tail()->parent() == object
 		    || arc->head()->parent() == object
 		    || arc->tail()->path() == msg.path

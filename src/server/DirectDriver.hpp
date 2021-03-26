@@ -18,12 +18,35 @@
 #define INGEN_ENGINE_DIRECT_DRIVER_HPP
 
 #include "Driver.hpp"
+#include "DuplexPort.hpp"
 #include "Engine.hpp"
+#include "EnginePort.hpp"
+#include "RunContext.hpp"
+#include "types.hpp"
+
+#include "raul/Path.hpp"
 
 #include <boost/intrusive/slist.hpp>
 
+#include <cstddef>
+#include <string>
+
+namespace boost {
+namespace intrusive {
+
+template <bool Enabled> struct cache_last;
+
+} // namespace intrusive
+} // namespace boost
+
 namespace ingen {
+
+class Atom;
+class URI;
+
 namespace server {
+
+class Buffer;
 
 /** Driver for running Ingen directly as a library.
  * \ingroup engine
@@ -40,7 +63,7 @@ public:
 		, _seq_size(seq_size)
 	{}
 
-	virtual ~DirectDriver() {
+	~DirectDriver() override {
 		_ports.clear_and_dispose([](EnginePort* p) { delete p; });
 	}
 
@@ -50,7 +73,7 @@ public:
 		return new EnginePort(graph_port);
 	}
 
-	EnginePort* get_port(const Raul::Path& path) override {
+	EnginePort* get_port(const raul::Path& path) override {
 		for (auto& p : _ports) {
 			if (p.graph_port()->path() == path) {
 				return &p;
@@ -60,18 +83,18 @@ public:
 		return nullptr;
 	}
 
-	void add_port(RunContext& context, EnginePort* port) override {
+	void add_port(RunContext&, EnginePort* port) override {
 		_ports.push_back(*port);
 	}
 
-	void remove_port(RunContext& context, EnginePort* port) override {
+	void remove_port(RunContext&, EnginePort* port) override {
 		_ports.erase(_ports.iterator_to(*port));
 	}
 
-	void rename_port(const Raul::Path& old_path,
-	                 const Raul::Path& new_path) override {}
+	void rename_port(const raul::Path& old_path,
+	                 const raul::Path& new_path) override {}
 
-	void port_property(const Raul::Path& path,
+	void port_property(const raul::Path& path,
 	                   const URI&        uri,
 	                   const Atom&       value) override {}
 
@@ -88,7 +111,7 @@ public:
 		return _engine.run_context().start();
 	}
 
-	void append_time_events(RunContext& context, Buffer& buffer) override {}
+	void append_time_events(RunContext&, Buffer&) override {}
 
 	int real_time_priority() override { return 60; }
 

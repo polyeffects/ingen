@@ -18,15 +18,21 @@
 #define INGEN_EVENTS_MOVE_HPP
 
 #include "Event.hpp"
+#include "types.hpp"
 
-#include "ingen/Store.hpp"
-#include "raul/Path.hpp"
+#include "ingen/Message.hpp"
+
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
-class GraphImpl;
-class PortImpl;
+class Engine;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -36,13 +42,13 @@ namespace events {
 class Move : public Event
 {
 public:
-	Move(Engine&                engine,
-	     const SPtr<Interface>& client,
-	     SampleCount            timestamp,
-	     const ingen::Move&     msg);
+	Move(Engine&                           engine,
+	     const std::shared_ptr<Interface>& client,
+	     SampleCount                       timestamp,
+	     const ingen::Move&                msg);
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 

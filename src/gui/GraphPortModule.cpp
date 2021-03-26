@@ -15,40 +15,47 @@
 */
 
 #include "App.hpp"
-#include "Style.hpp"
 #include "GraphCanvas.hpp"
 #include "GraphPortModule.hpp"
-#include "GraphWindow.hpp"
 #include "Port.hpp"
-#include "PortMenu.hpp"
-#include "RenameWindow.hpp"
-#include "WidgetFactory.hpp"
-#include "WindowFactory.hpp"
+
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
+#include "raul/Symbol.hpp"
 
 #include "ingen/Configuration.hpp"
 #include "ingen/Interface.hpp"
-#include "ingen/client/BlockModel.hpp"
-#include "ingen/client/GraphModel.hpp"
+#include "ingen/client/GraphModel.hpp" // IWYU pragma: keep
+#include "ingen/client/PortModel.hpp"
+
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
 
 #include <cassert>
+#include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
 namespace ingen {
 
-using namespace client;
-
 namespace gui {
 
-GraphPortModule::GraphPortModule(GraphCanvas&                         canvas,
-                                 const SPtr<const client::PortModel>& model)
-	: Ganv::Module(canvas, "", 0, 0, false) // FIXME: coords?
-	, _model(model)
-	, _port(nullptr)
+GraphPortModule::GraphPortModule(
+    GraphCanvas&                                    canvas,
+    const std::shared_ptr<const client::PortModel>& model)
+    : Ganv::Module(canvas, "", 0, 0, false) // FIXME: coords?
+    , _model(model)
+    , _port(nullptr)
 {
 	assert(model);
 
-	assert(dynamic_ptr_cast<const GraphModel>(model->parent()));
+	assert(
+	    std::dynamic_pointer_cast<const client::GraphModel>(model->parent()));
 
 	set_stacked(model->polyphonic());
 	if (model->is_input() && !model->is_numeric()) {
@@ -63,10 +70,11 @@ GraphPortModule::GraphPortModule(GraphCanvas&                         canvas,
 }
 
 GraphPortModule*
-GraphPortModule::create(GraphCanvas& canvas, const SPtr<const PortModel>& model)
+GraphPortModule::create(GraphCanvas&                                    canvas,
+                        const std::shared_ptr<const client::PortModel>& model)
 {
-	GraphPortModule* ret  = new GraphPortModule(canvas, model);
-	Port*            port = Port::create(canvas.app(), *ret, model, true);
+	auto* ret  = new GraphPortModule(canvas, model);
+	Port* port = Port::create(canvas.app(), *ret, model, true);
 
 	ret->set_port(port);
 	if (model->is_numeric()) {
@@ -83,7 +91,7 @@ GraphPortModule::create(GraphCanvas& canvas, const SPtr<const PortModel>& model)
 App&
 GraphPortModule::app() const
 {
-	return ((GraphCanvas*)canvas())->app();
+	return static_cast<GraphCanvas*>(canvas())->app();
 }
 
 bool
@@ -134,9 +142,9 @@ GraphPortModule::property_changed(const URI& key, const Atom& value)
 	const URIs& uris = app().uris();
 	if (value.type() == uris.forge.Float) {
 		if (key == uris.ingen_canvasX) {
-			move_to(value.get<float>(), get_y());
+			move_to(static_cast<double>(value.get<float>()), get_y());
 		} else if (key == uris.ingen_canvasY) {
-			move_to(get_x(), value.get<float>());
+			move_to(get_x(), static_cast<double>(value.get<float>()));
 		}
 	} else if (value.type() == uris.forge.String) {
 		if (key == uris.lv2_name &&

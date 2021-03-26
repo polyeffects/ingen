@@ -24,6 +24,7 @@
 #include "serd/serd.h"
 #include "sratom/sratom.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -41,7 +42,7 @@ namespace server {
 class INGEN_API UndoStack : public AtomSink {
 public:
 	struct Entry {
-		Entry(time_t time=0) : time(time) {}
+		Entry(time_t t=0) : time(t) {}
 
 		Entry(const Entry& copy)
 			: time(copy.time)
@@ -54,10 +55,12 @@ public:
 		~Entry() { clear(); }
 
 		Entry& operator=(const Entry& rhs) {
-			clear();
-			time = rhs.time;
-			for (const LV2_Atom* ev : rhs.events) {
-				push_event(ev);
+			if (&rhs != this) {
+				clear();
+				time = rhs.time;
+				for (const LV2_Atom* ev : rhs.events) {
+					push_event(ev);
+				}
 			}
 			return *this;
 		}
@@ -71,7 +74,7 @@ public:
 
 		void push_event(const LV2_Atom* ev) {
 			const uint32_t size = lv2_atom_total_size(ev);
-			LV2_Atom*      copy = (LV2_Atom*)malloc(size);
+			auto*          copy = static_cast<LV2_Atom*>(malloc(size));
 			memcpy(copy, ev, size);
 			events.push_front(copy);
 		}

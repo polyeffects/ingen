@@ -27,24 +27,22 @@
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
 #include "ingen/client/ClientStore.hpp"
-#include "ingen/client/GraphModel.hpp"
+#include "ingen/client/GraphModel.hpp" // IWYU pragma: keep
 #include "ingen/client/SigClientInterface.hpp"
 #include "ingen/ingen.h"
 #include "ingen/paths.hpp"
 #include "ingen/runtime_paths.hpp"
-#include "ingen/types.hpp"
 #include "lv2/atom/atom.h"
 #include "lv2/atom/util.h"
 #include "lv2/core/lv2.h"
-#include "lv2/core/lv2.h"
 #include "lv2/log/log.h"
 #include "lv2/ui/ui.h"
-#include "lv2/urid/urid.h"
 #include "lv2/urid/urid.h"
 #include "raul/Path.hpp"
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 
 #define INGEN_LV2_UI_URI INGEN_NS "GraphUIGtk2"
 
@@ -83,16 +81,16 @@ struct IngenLV2UI {
 		, sink(nullptr)
 	{}
 
-	int                              argc;
-	char**                           argv;
-	Forge*                           forge;
-	World*                           world;
-	IngenLV2AtomSink*                sink;
-	SPtr<gui::App>                   app;
-	SPtr<gui::GraphBox>              view;
-	SPtr<Interface>                  engine;
-	SPtr<AtomReader>                 reader;
-	SPtr<client::SigClientInterface> client;
+	int                                         argc;
+	char**                                      argv;
+	Forge*                                      forge;
+	World*                                      world;
+	IngenLV2AtomSink*                           sink;
+	std::shared_ptr<gui::App>                   app;
+	std::shared_ptr<gui::GraphBox>              view;
+	std::shared_ptr<Interface>                  engine;
+	std::shared_ptr<AtomReader>                 reader;
+	std::shared_ptr<client::SigClientInterface> client;
 };
 
 } // namespace ingen
@@ -106,24 +104,20 @@ instantiate(const LV2UI_Descriptor*   descriptor,
             LV2UI_Widget*             widget,
             const LV2_Feature* const* features)
 {
-#if __cplusplus >= 201103L
-	using ingen::SPtr;
-#endif
-
 	ingen::set_bundle_path(bundle_path);
 
-	ingen::IngenLV2UI* ui = new ingen::IngenLV2UI();
+	auto* ui = new ingen::IngenLV2UI();
 
 	LV2_URID_Map*   map   = nullptr;
 	LV2_URID_Unmap* unmap = nullptr;
 	LV2_Log_Log*    log   = nullptr;
 	for (int i = 0; features[i]; ++i) {
 		if (!strcmp(features[i]->URI, LV2_URID__map)) {
-			map = (LV2_URID_Map*)features[i]->data;
+			map = static_cast<LV2_URID_Map*>(features[i]->data);
 		} else if (!strcmp(features[i]->URI, LV2_URID__unmap)) {
-			unmap = (LV2_URID_Unmap*)features[i]->data;
+			unmap = static_cast<LV2_URID_Unmap*>(features[i]->data);
 		} else if (!strcmp(features[i]->URI, LV2_LOG__log)) {
-			log = (LV2_Log_Log*)features[i]->data;
+			log = static_cast<LV2_Log_Log*>(features[i]->data);
 		}
 	}
 
@@ -141,24 +135,22 @@ instantiate(const LV2UI_Descriptor*   descriptor,
 		ui->world->uris(), write_function, controller);
 
 	// Set up an engine interface that writes LV2 atoms
-	ui->engine = SPtr<ingen::Interface>(
+	ui->engine = std::shared_ptr<ingen::Interface>(
 		new ingen::AtomWriter(
 			ui->world->uri_map(), ui->world->uris(), *ui->sink));
 
 	ui->world->set_interface(ui->engine);
 
 	// Create App and client
-	ui->app = ingen::gui::App::create(*ui->world);
-	ui->client = SPtr<ingen::client::SigClientInterface>(
-		new ingen::client::SigClientInterface());
+	ui->app    = ingen::gui::App::create(*ui->world);
+	ui->client = std::make_shared<ingen::client::SigClientInterface>();
 	ui->app->set_is_plugin(true);
 	ui->app->attach(ui->client);
 
-	ui->reader = SPtr<ingen::AtomReader>(
-		new ingen::AtomReader(ui->world->uri_map(),
-		                      ui->world->uris(),
-		                      ui->world->log(),
-		                      *ui->client.get()));
+	ui->reader = std::make_shared<ingen::AtomReader>(ui->world->uri_map(),
+	                                                 ui->world->uris(),
+	                                                 ui->world->log(),
+	                                                 *ui->client);
 
 	// Create empty root graph model
 	ingen::Properties props;
@@ -167,9 +159,9 @@ instantiate(const LV2UI_Descriptor*   descriptor,
 	ui->app->store()->put(ingen::main_uri(), props);
 
 	// Create a GraphBox for the root and set as the UI widget
-	SPtr<const ingen::client::GraphModel> root =
-		ingen::dynamic_ptr_cast<const ingen::client::GraphModel>(
-			ui->app->store()->object(Raul::Path("/")));
+	auto root = std::dynamic_pointer_cast<const ingen::client::GraphModel>(
+	    ui->app->store()->object(raul::Path("/")));
+
 	ui->view = ingen::gui::GraphBox::create(*ui->app, root);
 	ui->view->unparent();
 	*widget = ui->view->gobj();
@@ -183,7 +175,7 @@ instantiate(const LV2UI_Descriptor*   descriptor,
 static void
 cleanup(LV2UI_Handle handle)
 {
-	ingen::IngenLV2UI* ui = (ingen::IngenLV2UI*)handle;
+	auto* ui = static_cast<ingen::IngenLV2UI*>(handle);
 	delete ui;
 }
 
@@ -194,8 +186,8 @@ port_event(LV2UI_Handle handle,
            uint32_t     format,
            const void*  buffer)
 {
-	ingen::IngenLV2UI* ui   = (ingen::IngenLV2UI*)handle;
-	const LV2_Atom*    atom = (const LV2_Atom*)buffer;
+	auto*       ui   = static_cast<ingen::IngenLV2UI*>(handle);
+	const auto* atom = static_cast<const LV2_Atom*>(buffer);
 	ui->reader->write(atom);
 }
 

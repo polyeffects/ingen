@@ -19,16 +19,22 @@
 
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Message.hpp"
+#include "ingen/Status.hpp"
+#include "ingen/URI.hpp"
 
 #include <boost/variant/get.hpp>
 
-using namespace ingen;
+#include <cstdlib>
 
-class TestClient : public ingen::Interface
+namespace ingen {
+
+class TestClient : public Interface
 {
 public:
 	explicit TestClient(Log& log) : _log(log) {}
-	~TestClient() {}
+
+	~TestClient() override = default;
 
 	URI uri() const override { return URI("ingen:testClient"); }
 
@@ -50,5 +56,7 @@ public:
 private:
 	Log& _log;
 };
+
+} // namespace ingen
 
 #endif // INGEN_TESTCLIENT_HPP

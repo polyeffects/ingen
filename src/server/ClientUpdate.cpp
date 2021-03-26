@@ -24,16 +24,18 @@
 #include "PortType.hpp"
 
 #include "ingen/Arc.hpp"
-#include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Node.hpp"
 #include "ingen/URIs.hpp"
-#include "ingen/types.hpp"
+
+#include <boost/intrusive/slist.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <utility>
 
 namespace ingen {
@@ -69,7 +71,7 @@ ClientUpdate::put_block(const BlockImpl* block)
 	const URIs&             uris   = plugin->uris();
 
 	if (uris.ingen_Graph == plugin->type()) {
-		put_graph((const GraphImpl*)block);
+		put_graph(static_cast<const GraphImpl*>(block));
 	} else {
 		put(block->uri(), block->properties());
 		for (size_t j = 0; j < block->num_ports(); ++j) {
@@ -101,8 +103,8 @@ ClientUpdate::put_graph(const GraphImpl* graph)
 
 	// Enqueue arcs
 	for (const auto& a : graph->arcs()) {
-		const SPtr<const Arc> arc     = a.second;
-		const Connect         connect = { arc->tail_path(), arc->head_path() };
+		const auto    arc     = a.second;
+		const Connect connect = {arc->tail_path(), arc->head_path()};
 		connects.push_back(connect);
 	}
 }
@@ -124,7 +126,7 @@ ClientUpdate::put_preset(const URIs&        uris,
                          const std::string& label)
 {
 	const Properties props{
-		{ uris.rdf_type, uris.pset_Preset.urid },
+		{ uris.rdf_type, uris.pset_Preset.urid_atom() },
 		{ uris.rdfs_label, uris.forge.alloc(label) },
 		{ uris.lv2_appliesTo, uris.forge.make_urid(plugin) }};
 	put(preset, props);

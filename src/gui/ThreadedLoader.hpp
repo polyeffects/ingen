@@ -18,21 +18,29 @@
 #define INGEN_GUI_THREADEDLOADER_HPP
 
 #include "ingen/FilePath.hpp"
-#include "ingen/Interface.hpp"
-#include "ingen/Parser.hpp"
-#include "ingen/Serialiser.hpp"
 #include "raul/Semaphore.hpp"
 
-#include <boost/optional/optional.hpp>
-#include <sigc++/sigc++.h>
+#include <sigc++/functors/slot.h>
 
 #include <list>
+#include <memory>
 #include <mutex>
 #include <thread>
-#include <utility>
+
+namespace boost {
+template <class T> class optional;
+} // namespace boost
+
+namespace raul {
+class Path;
+class Symbol;
+} // namespace raul
 
 namespace ingen {
 
+class Interface;
+class Parser;
+class Properties;
 class URI;
 
 namespace client { class GraphModel; }
@@ -56,41 +64,43 @@ class ThreadedLoader
 {
 public:
 	ThreadedLoader(App&            app,
-	               SPtr<Interface> engine);
+	               std::shared_ptr<Interface> engine);
 
 	~ThreadedLoader();
 
-	void load_graph(bool                          merge,
-	                const FilePath&               file_path,
-	                boost::optional<Raul::Path>   engine_parent,
-	                boost::optional<Raul::Symbol> engine_symbol,
-	                boost::optional<Properties>   engine_data);
+	void load_graph(bool                                 merge,
+	                const FilePath&                      file_path,
+	                const boost::optional<raul::Path>&   engine_parent,
+	                const boost::optional<raul::Symbol>& engine_symbol,
+	                const boost::optional<Properties>&   engine_data);
 
-	void save_graph(SPtr<const client::GraphModel> model, const URI& uri);
+	void save_graph(const std::shared_ptr<const client::GraphModel>& model,
+	                const URI&                                       uri);
 
-	SPtr<Parser> parser();
+	std::shared_ptr<Parser> parser();
 
 private:
-	void load_graph_event(const FilePath&               file_path,
-	                      boost::optional<Raul::Path>   engine_parent,
-	                      boost::optional<Raul::Symbol> engine_symbol,
-	                      boost::optional<Properties>   engine_data);
+	void load_graph_event(const FilePath&                      file_path,
+	                      const boost::optional<raul::Path>&   engine_parent,
+	                      const boost::optional<raul::Symbol>& engine_symbol,
+	                      const boost::optional<Properties>&   engine_data);
 
-	void save_graph_event(SPtr<const client::GraphModel> model,
-	                      const URI&                     filename);
+	void
+	save_graph_event(const std::shared_ptr<const client::GraphModel>& model,
+	                 const URI&                                       uri);
 
 	/** Returns nothing and takes no parameters (because they have all been bound) */
 	using Closure = sigc::slot<void>;
 
 	void run();
 
-	App&               _app;
-	Raul::Semaphore    _sem;
-	SPtr<Interface>    _engine;
-	std::mutex         _mutex;
-	std::list<Closure> _events;
-	bool               _exit_flag;
-	std::thread        _thread;
+	App&                       _app;
+	raul::Semaphore            _sem;
+	std::shared_ptr<Interface> _engine;
+	std::mutex                 _mutex;
+	std::list<Closure>         _events;
+	bool                       _exit_flag;
+	std::thread                _thread;
 };
 
 } // namespace gui

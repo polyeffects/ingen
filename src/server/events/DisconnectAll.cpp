@@ -19,19 +19,23 @@
 #include "ArcImpl.hpp"
 #include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "InputPort.hpp"
+#include "NodeImpl.hpp"
 #include "PortImpl.hpp"
 #include "PreProcessContext.hpp"
 #include "events/Disconnect.hpp"
-#include "util.hpp"
 
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
-#include "raul/Array.hpp"
 #include "raul/Maid.hpp"
-#include "raul/Path.hpp"
 
+#include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <utility>
@@ -40,16 +44,16 @@ namespace ingen {
 namespace server {
 namespace events {
 
-DisconnectAll::DisconnectAll(Engine&                     engine,
-                             const SPtr<Interface>&      client,
-                             SampleCount                 timestamp,
-                             const ingen::DisconnectAll& msg)
-	: Event(engine, client, msg.seq, timestamp)
-	, _msg(msg)
-	, _parent(nullptr)
-	, _block(nullptr)
-	, _port(nullptr)
-	, _deleting(false)
+DisconnectAll::DisconnectAll(Engine&                           engine,
+                             const std::shared_ptr<Interface>& client,
+                             SampleCount                       timestamp,
+                             const ingen::DisconnectAll&       msg)
+    : Event(engine, client, msg.seq, timestamp)
+    , _msg(msg)
+    , _parent(nullptr)
+    , _block(nullptr)
+    , _port(nullptr)
+    , _deleting(false)
 {
 }
 
@@ -143,11 +147,11 @@ DisconnectAll::pre_process(PreProcessContext& ctx)
 }
 
 void
-DisconnectAll::execute(RunContext& context)
+DisconnectAll::execute(RunContext& ctx)
 {
 	if (_status == Status::SUCCESS) {
 		for (auto& i : _impls) {
-			i->execute(context,
+			i->execute(ctx,
 			           !_deleting || (i->head()->parent_block() != _block));
 		}
 	}

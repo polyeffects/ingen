@@ -17,38 +17,41 @@
 #include "JackDriver.hpp"
 
 #include "Buffer.hpp"
+#include "BufferFactory.hpp"
+#include "BufferRef.hpp"
 #include "DuplexPort.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
-#include "PortImpl.hpp"
+#include "PortType.hpp"
+#include "RunContext.hpp"
 #include "ThreadManager.hpp"
 #include "ingen_config.h"
 #include "util.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
-#include "ingen/LV2Features.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Properties.hpp"
 #include "ingen/URI.hpp"
 #include "ingen/URIMap.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
-#include "ingen/fmt.hpp"
+#include "lv2/atom/atom.h"
+#include "lv2/atom/forge.h"
 #include "lv2/atom/util.h"
+#include "raul/Path.hpp"
 
 #include <jack/midiport.h>
-#ifdef INGEN_JACK_SESSION
-#include <jack/session.h>
-#include "ingen/Serialiser.hpp"
-#endif
+#include <jack/transport.h>
+
 #ifdef HAVE_JACK_METADATA
-#include <jack/metadata.h>
 #include "jackey.h"
+#include <jack/metadata.h>
 #endif
 
 #include <cassert>
 #include <chrono>
-#include <cstdlib>
-#include <cstring>
-#include <mutex>
+#include <map>
 #include <string>
 #include <utility>
 
@@ -59,6 +62,7 @@ namespace server {
 
 JackDriver::JackDriver(Engine& engine)
 	: _engine(engine)
+	, _forge()
 	, _sem(0)
 	, _flag(false)
 	, _client(nullptr)
@@ -66,13 +70,14 @@ JackDriver::JackDriver(Engine& engine)
 	, _seq_size(0)
 	, _sample_rate(0)
 	, _is_activated(false)
-	, _old_bpm(120.0f)
+	, _position()
+	, _transport_state()
+	, _old_bpm(120.0)
 	, _old_frame(0)
 	, _old_rolling(false)
 {
 	_midi_event_type = _engine.world().uris().midi_MidiEvent;
-	lv2_atom_forge_init(
-		&_forge, &engine.world().uri_map().urid_map_feature()->urid_map);
+	lv2_atom_forge_init(&_forge, &engine.world().uri_map().urid_map());
 }
 
 JackDriver::~JackDriver()
@@ -88,17 +93,6 @@ JackDriver::attach(const std::string& server_name,
 {
 	assert(!_client);
 	if (!jack_client) {
-#ifdef INGEN_JACK_SESSION
-		const std::string uuid = _engine.world().jack_uuid();
-		if (!uuid.empty()) {
-			_client = jack_client_open(client_name.c_str(),
-			                           JackSessionID, nullptr,
-			                           uuid.c_str());
-			_engine.log().info("Connected to Jack as `%1%' (UUID `%2%')\n",
-			                   client_name.c_str(), uuid);
-		}
-#endif
-
 		// Try supplied server name
 		if (!_client && !server_name.empty()) {
 			if ((_client = jack_client_open(client_name.c_str(),
@@ -122,7 +116,7 @@ JackDriver::attach(const std::string& server_name,
 			return false;
 		}
 	} else {
-		_client = (jack_client_t*)jack_client;
+		_client = static_cast<jack_client_t*>(jack_client);
 	}
 
 	_sample_rate  = jack_get_sample_rate(_client);
@@ -137,9 +131,6 @@ JackDriver::attach(const std::string& server_name,
 
 	jack_set_thread_init_callback(_client, thread_init_cb, this);
 	jack_set_buffer_size_callback(_client, block_length_cb, this);
-#ifdef INGEN_JACK_SESSION
-	jack_set_session_callback(_client, session_cb, this);
-#endif
 
 	for (auto& p : _ports) {
 		register_port(p);
@@ -204,7 +195,7 @@ JackDriver::deactivate()
 }
 
 EnginePort*
-JackDriver::get_port(const Raul::Path& path)
+JackDriver::get_port(const raul::Path& path)
 {
 	for (auto& p : _ports) {
 		if (p.graph_port()->path() == path) {
@@ -216,14 +207,14 @@ JackDriver::get_port(const Raul::Path& path)
 }
 
 void
-JackDriver::add_port(RunContext& context, EnginePort* port)
+JackDriver::add_port(RunContext& ctx, EnginePort* port)
 {
 	_ports.push_back(*port);
 
 	DuplexPort* graph_port = port->graph_port();
 	if (graph_port->is_a(PortType::AUDIO) || graph_port->is_a(PortType::CV)) {
-		const SampleCount nframes = context.nframes();
-		jack_port_t*      jport   = (jack_port_t*)port->handle();
+		const SampleCount nframes = ctx.nframes();
+		auto*             jport   = static_cast<jack_port_t*>(port->handle());
 		void*             jbuf    = jack_port_get_buffer(jport, nframes);
 
 		/* Jack fails to return a buffer if this is too soon after registering
@@ -235,7 +226,7 @@ JackDriver::add_port(RunContext& context, EnginePort* port)
 }
 
 void
-JackDriver::remove_port(RunContext& context, EnginePort* port)
+JackDriver::remove_port(RunContext&, EnginePort* port)
 {
 	_ports.erase(_ports.iterator_to(*port));
 }
@@ -267,7 +258,7 @@ JackDriver::register_port(EnginePort& port)
 void
 JackDriver::unregister_port(EnginePort& port)
 {
-	if (jack_port_unregister(_client, (jack_port_t*)port.handle())) {
+	if (jack_port_unregister(_client, static_cast<jack_port_t*>(port.handle()))) {
 		_engine.log().error("Failed to unregister Jack port\n");
 	}
 
@@ -275,14 +266,15 @@ JackDriver::unregister_port(EnginePort& port)
 }
 
 void
-JackDriver::rename_port(const Raul::Path& old_path,
-                        const Raul::Path& new_path)
+JackDriver::rename_port(const raul::Path& old_path,
+                        const raul::Path& new_path)
 {
 	EnginePort* eport = get_port(old_path);
 	if (eport) {
 #ifdef HAVE_JACK_PORT_RENAME
-		jack_port_rename(
-			_client, (jack_port_t*)eport->handle(), new_path.substr(1).c_str());
+		jack_port_rename(_client,
+		                 static_cast<jack_port_t*>(eport->handle()),
+		                 new_path.substr(1).c_str());
 #else
 		jack_port_set_name((jack_port_t*)eport->handle(),
 		                   new_path.substr(1).c_str());
@@ -291,14 +283,16 @@ JackDriver::rename_port(const Raul::Path& old_path,
 }
 
 void
-JackDriver::port_property(const Raul::Path& path,
+JackDriver::port_property(const raul::Path& path,
                           const URI&        uri,
                           const Atom&       value)
 {
 #ifdef HAVE_JACK_METADATA
 	EnginePort* eport = get_port(path);
 	if (eport) {
-		const jack_port_t* const jport = (const jack_port_t*)eport->handle();
+		const auto* const jport =
+		    static_cast<const jack_port_t*>(eport->handle());
+
 		port_property_internal(jport, uri, value);
 	}
 #endif
@@ -348,11 +342,11 @@ JackDriver::create_port(DuplexPort* graph_port)
 }
 
 void
-JackDriver::pre_process_port(RunContext& context, EnginePort* port)
+JackDriver::pre_process_port(RunContext& ctx, EnginePort* port)
 {
-	const URIs&       uris       = context.engine().world().uris();
-	const SampleCount nframes    = context.nframes();
-	jack_port_t*      jack_port  = (jack_port_t*)port->handle();
+	const URIs&       uris       = ctx.engine().world().uris();
+	const SampleCount nframes    = ctx.nframes();
+	auto*             jack_port  = static_cast<jack_port_t*>(port->handle());
 	DuplexPort*       graph_port = port->graph_port();
 	Buffer*           graph_buf  = graph_port->buffer(0).get();
 	void*             jack_buf   = jack_port_get_buffer(jack_port, nframes);
@@ -360,12 +354,12 @@ JackDriver::pre_process_port(RunContext& context, EnginePort* port)
 	if (graph_port->is_a(PortType::AUDIO) || graph_port->is_a(PortType::CV)) {
 		graph_port->set_driver_buffer(jack_buf, nframes * sizeof(float));
 		if (graph_port->is_input()) {
-			graph_port->monitor(context);
+			graph_port->monitor(ctx);
 		} else {
 			graph_port->buffer(0)->clear(); // TODO: Avoid when possible
 		}
 	} else if (graph_port->buffer_type() == uris.atom_Sequence) {
-		graph_buf->prepare_write(context);
+		graph_buf->prepare_write(ctx);
 		if (graph_port->is_input()) {
 			// Copy events from Jack port buffer into graph port buffer
 			const jack_nframes_t event_count = jack_midi_get_event_count(jack_buf);
@@ -378,16 +372,16 @@ JackDriver::pre_process_port(RunContext& context, EnginePort* port)
 				}
 			}
 		}
-		graph_port->monitor(context);
+		graph_port->monitor(ctx);
 	}
 }
 
 void
-JackDriver::post_process_port(RunContext& context, EnginePort* port)
+JackDriver::post_process_port(RunContext& ctx, EnginePort* port) const
 {
-	const URIs&       uris       = context.engine().world().uris();
-	const SampleCount nframes    = context.nframes();
-	jack_port_t*      jack_port  = (jack_port_t*)port->handle();
+	const URIs&       uris       = ctx.engine().world().uris();
+	const SampleCount nframes    = ctx.nframes();
+	auto*             jack_port  = static_cast<jack_port_t*>(port->handle());
 	DuplexPort*       graph_port = port->graph_port();
 	void*             jack_buf   = port->buffer();
 
@@ -400,13 +394,15 @@ JackDriver::post_process_port(RunContext& context, EnginePort* port)
 
 		if (graph_port->buffer_type() == uris.atom_Sequence) {
 			// Copy LV2 MIDI events to Jack MIDI buffer
-			Buffer* const      graph_buf = graph_port->buffer(0).get();
-			LV2_Atom_Sequence* seq       = graph_buf->get<LV2_Atom_Sequence>();
+			Buffer* const graph_buf = graph_port->buffer(0).get();
+			auto*         seq       = graph_buf->get<LV2_Atom_Sequence>();
 
 			jack_midi_clear_buffer(jack_buf);
 			LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
-				const uint8_t* buf = (const uint8_t*)LV2_ATOM_BODY(&ev->body);
-				if (ev->body.type == _midi_event_type) {
+				const auto* buf =
+				    static_cast<const uint8_t*>(LV2_ATOM_BODY(&ev->body));
+
+				if (ev->body.type == this->_midi_event_type) {
 					jack_midi_event_write(
 						jack_buf, ev->time.frames, buf, ev->body.size);
 				}
@@ -421,10 +417,9 @@ JackDriver::post_process_port(RunContext& context, EnginePort* port)
 }
 
 void
-JackDriver::append_time_events(RunContext& context,
-                               Buffer&     buffer)
+JackDriver::append_time_events(RunContext& ctx, Buffer& buffer)
 {
-	const URIs&            uris    = context.engine().world().uris();
+	const URIs&            uris    = ctx.engine().world().uris();
 	const jack_position_t* pos     = &_position;
 	const bool             rolling = (_transport_state == JackTransportRolling);
 
@@ -443,7 +438,10 @@ JackDriver::append_time_events(RunContext& context,
 	// Build an LV2 position object to append to the buffer
 	LV2_Atom             pos_buf[16];
 	LV2_Atom_Forge_Frame frame;
-	lv2_atom_forge_set_buffer(&_forge, (uint8_t*)pos_buf, sizeof(pos_buf));
+	lv2_atom_forge_set_buffer(&_forge,
+	                          reinterpret_cast<uint8_t*>(pos_buf),
+	                          sizeof(pos_buf));
+
 	lv2_atom_forge_object(&_forge, &frame, 0, uris.time_Position);
 	lv2_atom_forge_key(&_forge, uris.time_frame);
 	lv2_atom_forge_long(&_forge, pos->frame);
@@ -464,9 +462,11 @@ JackDriver::append_time_events(RunContext& context,
 	}
 
 	// Append position to buffer at offset 0 (start of this cycle)
-	LV2_Atom* lpos = (LV2_Atom*)pos_buf;
-	buffer.append_event(
-		0, lpos->size, lpos->type, (const uint8_t*)LV2_ATOM_BODY_CONST(lpos));
+	auto* lpos = static_cast<LV2_Atom*>(pos_buf);
+	buffer.append_event(0,
+	                    lpos->size,
+	                    lpos->type,
+	                    static_cast<const uint8_t*>(LV2_ATOM_BODY_CONST(lpos)));
 }
 
 /**** Jack Callbacks ****/
@@ -515,7 +515,7 @@ JackDriver::_process_cb(jack_nframes_t nframes)
 }
 
 void
-JackDriver::_thread_init_cb()
+JackDriver::thread_init_cb(void*)
 {
 	ThreadManager::set_flag(THREAD_PROCESS);
 	ThreadManager::set_flag(THREAD_IS_REAL_TIME);
@@ -544,44 +544,6 @@ JackDriver::_block_length_cb(jack_nframes_t nframes)
 	}
 	return 0;
 }
-
-#ifdef INGEN_JACK_SESSION
-void
-JackDriver::_session_cb(jack_session_event_t* event)
-{
-	_engine.log().info("Jack session save to %1%\n", event->session_dir);
-
-	const std::string cmd = fmt("ingen -eg -n %1% -u %2% -l ${SESSION_DIR}",
-	                            jack_get_client_name(_client),
-	                            event->client_uuid);
-
-	SPtr<Serialiser> serialiser = _engine.world().serialiser();
-	if (serialiser) {
-		std::lock_guard<std::mutex> lock(_engine.world().rdf_mutex());
-
-		SPtr<Node> root(_engine.root_graph(), NullDeleter<Node>);
-		serialiser->write_bundle(root,
-		                         URI(std::string("file://") + event->session_dir));
-	}
-
-	event->command_line = (char*)malloc(cmd.size() + 1);
-	memcpy(event->command_line, cmd.c_str(), cmd.size() + 1);
-	jack_session_reply(_client, event);
-
-	switch (event->type) {
-	case JackSessionSave:
-		break;
-	case JackSessionSaveAndQuit:
-		_engine.log().warn("Jack session quit\n");
-		_engine.quit();
-		break;
-	case JackSessionSaveTemplate:
-		break;
-	}
-
-	jack_session_event_free(event);
-}
-#endif
 
 } // namespace server
 } // namespace ingen

@@ -19,17 +19,34 @@
 
 #include "ObjectMenu.hpp"
 
-#include "ingen/client/BlockModel.hpp"
-#include "ingen/types.hpp"
+#include "ingen/URI.hpp"
 
-#include <gtkmm/builder.h>
 #include <gtkmm/menu.h>
-#include <gtkmm/menushell.h>
+#include <sigc++/connection.h>
+#include <sigc++/signal.h>
 
+#include <memory>
 #include <string>
 
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+class CheckMenuItem;
+class MenuItem;
+} // namespace Gtk
+
 namespace ingen {
+
+namespace client {
+class BlockModel;
+} // namespace client
+
 namespace gui {
+
+class App;
 
 /** Menu for a Node.
  *
@@ -41,7 +58,7 @@ public:
 	NodeMenu(BaseObjectType*                   cobject,
 	         const Glib::RefPtr<Gtk::Builder>& xml);
 
-	void init(App& app, SPtr<const client::BlockModel> block);
+	void init(App& app, const std::shared_ptr<const client::BlockModel>& block);
 
 	bool has_control_inputs();
 
@@ -49,8 +66,8 @@ public:
 	sigc::signal<void, bool> signal_embed_gui;
 
 protected:
-	SPtr<const client::BlockModel> block() const {
-		return dynamic_ptr_cast<const client::BlockModel>(_object);
+	std::shared_ptr<const client::BlockModel> block() const {
+		return std::dynamic_pointer_cast<const client::BlockModel>(_object);
 	}
 
 	void add_preset(const URI& uri, const std::string& label);

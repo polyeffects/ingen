@@ -17,21 +17,28 @@
 #ifndef INGEN_ENGINE_INPUTPORT_HPP
 #define INGEN_ENGINE_INPUTPORT_HPP
 
-#include "ArcImpl.hpp"
+#include "ArcImpl.hpp" // IWYU pragma: keep
 #include "PortImpl.hpp"
 #include "PortType.hpp"
 #include "types.hpp"
 
-#include "ingen/types.hpp"
 #include "lv2/urid/urid.h"
+#include "raul/Maid.hpp"
 
-#include <boost/intrusive/options.hpp>
 #include <boost/intrusive/slist.hpp>
 
 #include <cstdint>
 #include <cstdlib>
 
-namespace Raul { class Symbol; }
+namespace raul { class Symbol; }
+
+namespace boost {
+namespace intrusive {
+
+template <bool Enabled> struct constant_time_size;
+
+} // namespace intrusive
+} // namespace boost
 
 namespace ingen {
 
@@ -59,7 +66,7 @@ class InputPort : public PortImpl
 public:
 	InputPort(BufferFactory&      bufs,
 	          BlockImpl*          parent,
-	          const Raul::Symbol& symbol,
+	          const raul::Symbol& symbol,
 	          uint32_t            index,
 	          uint32_t            poly,
 	          PortType            type,
@@ -72,9 +79,9 @@ public:
 	                                boost::intrusive::constant_time_size<true>>;
 
 	/** Return the maximum polyphony of an output connected to this input. */
-	virtual uint32_t max_tail_poly(RunContext& context) const;
+	virtual uint32_t max_tail_poly(RunContext& ctx) const;
 
-	bool apply_poly(RunContext& context, uint32_t poly) override;
+	bool apply_poly(RunContext& ctx, uint32_t poly) override;
 
 	/** Add an arc.  Realtime safe.
 	 *
@@ -83,7 +90,7 @@ public:
 	 *
 	 * setup_buffers() must be called later for the change to take effect.
 	 */
-	void add_arc(RunContext& context, ArcImpl& c);
+	void add_arc(RunContext& ctx, ArcImpl& c);
 
 	/** Remove an arc.  Realtime safe.
 	 *
@@ -97,21 +104,21 @@ public:
 	 * pre-process thread to allocate buffers for application of a
 	 * connection/disconnection/etc in the next process cycle.
 	 */
-	bool pre_get_buffers(BufferFactory& bufs,
-	                     MPtr<Voices>&  voices,
-	                     uint32_t       poly) const;
+	bool pre_get_buffers(BufferFactory&             bufs,
+	                     raul::managed_ptr<Voices>& voices,
+	                     uint32_t                   poly) const;
 
 	bool
 	setup_buffers(RunContext& ctx, BufferFactory& bufs, uint32_t poly) override;
 
 	/** Set up buffer pointers. */
-	void pre_process(RunContext& context) override;
+	void pre_process(RunContext& ctx) override;
 
 	/** Prepare buffer for access, mixing if necessary. */
-	void pre_run(RunContext& context) override;
+	void pre_run(RunContext& ctx) override;
 
 	/** Prepare buffer for next process cycle. */
-	void post_process(RunContext& context) override;
+	void post_process(RunContext& ctx) override;
 
 	SampleCount
 	next_value_offset(SampleCount offset, SampleCount end) const override;
@@ -123,11 +130,11 @@ public:
 	bool direct_connect() const;
 
 protected:
-	bool get_buffers(BufferFactory&      bufs,
-	                 PortImpl::GetFn     get,
-	                 const MPtr<Voices>& voices,
-	                 uint32_t            poly,
-	                 size_t              num_in_arcs) const override;
+	bool get_buffers(BufferFactory&                   bufs,
+	                 PortImpl::GetFn                  get,
+	                 const raul::managed_ptr<Voices>& voices,
+	                 uint32_t                         poly,
+	                 size_t num_in_arcs) const override;
 
 	size_t _num_arcs;  ///< Pre-process thread
 	Arcs   _arcs;      ///< Audio thread

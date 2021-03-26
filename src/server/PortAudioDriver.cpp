@@ -45,6 +45,8 @@ pa_error(const char* msg, PaError err)
 
 PortAudioDriver::PortAudioDriver(Engine& engine)
 	: _engine(engine)
+	, _inputParameters()
+	, _outputParameters()
 	, _sem(0)
 	, _stream(nullptr)
 	, _seq_size(4096)
@@ -157,7 +159,7 @@ PortAudioDriver::frame_time() const
 }
 
 EnginePort*
-PortAudioDriver::get_port(const Raul::Path& path)
+PortAudioDriver::get_port(const raul::Path& path)
 {
 	for (auto& p : _ports) {
 		if (p.graph_port()->path() == path) {
@@ -169,13 +171,13 @@ PortAudioDriver::get_port(const Raul::Path& path)
 }
 
 void
-PortAudioDriver::add_port(RunContext& context, EnginePort* port)
+PortAudioDriver::add_port(RunContext&, EnginePort* port)
 {
 	_ports.push_back(*port);
 }
 
 void
-PortAudioDriver::remove_port(RunContext& context, EnginePort* port)
+PortAudioDriver::remove_port(RunContext&, EnginePort* port)
 {
 	_ports.erase(_ports.iterator_to(*port));
 }
@@ -191,13 +193,13 @@ PortAudioDriver::unregister_port(EnginePort& port)
 }
 
 void
-PortAudioDriver::rename_port(const Raul::Path& old_path,
-                             const Raul::Path& new_path)
+PortAudioDriver::rename_port(const raul::Path& old_path,
+                             const raul::Path& new_path)
 {
 }
 
 void
-PortAudioDriver::port_property(const Raul::Path& path,
+PortAudioDriver::port_property(const raul::Path& path,
                                const URI&        uri,
                                const Atom&       value)
 {
@@ -233,7 +235,7 @@ PortAudioDriver::create_port(DuplexPort* graph_port)
 }
 
 void
-PortAudioDriver::pre_process_port(RunContext& context,
+PortAudioDriver::pre_process_port(RunContext&,
                                   EnginePort* port,
                                   const void* inputs,
                                   void*       outputs)
@@ -243,9 +245,14 @@ PortAudioDriver::pre_process_port(RunContext& context,
 	}
 
 	if (port->is_input()) {
-		port->set_buffer(((float**)inputs)[port->driver_index()]);
+		const auto* const* const ins =
+		    static_cast<const float* const*>(inputs);
+
+		port->set_buffer(const_cast<float*>(ins[port->driver_index()]));
 	} else {
-		port->set_buffer(((float**)outputs)[port->driver_index()]);
+		auto* const* const outs = static_cast<float* const*>(inputs);
+
+		port->set_buffer(outs[port->driver_index()]);
 		memset(port->buffer(), 0, _block_length * sizeof(float));
 	}
 
@@ -254,7 +261,7 @@ PortAudioDriver::pre_process_port(RunContext& context,
 }
 
 void
-PortAudioDriver::post_process_port(RunContext& context,
+PortAudioDriver::post_process_port(RunContext&,
                                    EnginePort* port,
                                    const void* inputs,
                                    void*       outputs)

@@ -17,15 +17,26 @@
 #ifndef INGEN_EVENTS_COPY_HPP
 #define INGEN_EVENTS_COPY_HPP
 
-#include "CompiledGraph.hpp"
 #include "Event.hpp"
+#include "types.hpp"
+
+#include "ingen/Message.hpp"
+#include "raul/Maid.hpp"
+
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
 class BlockImpl;
+class CompiledGraph;
 class Engine;
 class GraphImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -35,13 +46,15 @@ namespace events {
 class Copy : public Event
 {
 public:
-	Copy(Engine&                engine,
-	     const SPtr<Interface>& client,
-	     SampleCount            timestamp,
-	     const ingen::Copy&     msg);
+	Copy(Engine&                           engine,
+	     const std::shared_ptr<Interface>& client,
+	     SampleCount                       timestamp,
+	     const ingen::Copy&                msg);
+
+	~Copy() override;
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
@@ -50,11 +63,11 @@ private:
 	bool engine_to_filesystem(PreProcessContext& ctx);
 	bool filesystem_to_engine(PreProcessContext& ctx);
 
-	const ingen::Copy   _msg;
-	SPtr<BlockImpl>     _old_block;
-	GraphImpl*          _parent;
-	BlockImpl*          _block;
-	MPtr<CompiledGraph> _compiled_graph;
+	const ingen::Copy                _msg;
+	std::shared_ptr<BlockImpl>       _old_block;
+	GraphImpl*                       _parent;
+	BlockImpl*                       _block;
+	raul::managed_ptr<CompiledGraph> _compiled_graph;
 };
 
 } // namespace events

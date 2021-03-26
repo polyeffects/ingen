@@ -14,39 +14,47 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+// IWYU pragma: no_include "ingen/FilePath.hpp"
+
 #include "PortAudioDriver.hpp"
 #include "Engine.hpp"
 
 #include "ingen/Log.hpp"
 #include "ingen/Module.hpp"
 #include "ingen/World.hpp"
-#include "ingen/types.hpp"
 
-namespace ingen { namespace server { class Driver; } }
+#include <memory>
 
-using namespace ingen;
+namespace ingen {
+namespace server {
 
-struct IngenPortAudioModule : public ingen::Module {
-	void load(ingen::World& world) override {
-		if (((server::Engine*)world.engine().get())->driver()) {
+class Driver;
+
+struct PortAudioModule : public Module {
+	void load(World& world) override {
+		server::Engine* const engine =
+		    static_cast<server::Engine*>(world.engine().get());
+
+		if (engine->driver()) {
 			world.log().warn("Engine already has a driver\n");
 			return;
 		}
 
-		server::PortAudioDriver* driver = new server::PortAudioDriver(
-			*(server::Engine*)world.engine().get());
+		auto* driver = new server::PortAudioDriver(*engine);
 		driver->attach();
-		((server::Engine*)world.engine().get())->set_driver(
-			SPtr<server::Driver>(driver));
+		engine->set_driver(std::shared_ptr<server::Driver>(driver));
 	}
 };
+
+} // namespace server
+} // namespace ingen
 
 extern "C" {
 
 ingen::Module*
 ingen_module_load()
 {
-	return new IngenPortAudioModule();
+	return new ingen::server::PortAudioModule();
 }
 
 } // extern "C"

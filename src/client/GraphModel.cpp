@@ -16,12 +16,17 @@
 
 #include "ingen/client/GraphModel.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/client/ArcModel.hpp"
 #include "ingen/client/BlockModel.hpp"
-#include "ingen/client/ClientStore.hpp"
+#include "ingen/client/ObjectModel.hpp"
+#include "ingen/client/PortModel.hpp"
+#include "raul/Path.hpp"
 
 #include <cassert>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -29,35 +34,35 @@ namespace ingen {
 namespace client {
 
 void
-GraphModel::add_child(const SPtr<ObjectModel>& c)
+GraphModel::add_child(const std::shared_ptr<ObjectModel>& c)
 {
 	assert(c->parent().get() == this);
 
-	SPtr<PortModel> pm = dynamic_ptr_cast<PortModel>(c);
+	auto pm = std::dynamic_pointer_cast<PortModel>(c);
 	if (pm) {
 		add_port(pm);
 		return;
 	}
 
-	SPtr<BlockModel> bm = dynamic_ptr_cast<BlockModel>(c);
+	auto bm = std::dynamic_pointer_cast<BlockModel>(c);
 	if (bm) {
 		_signal_new_block.emit(bm);
 	}
 }
 
 bool
-GraphModel::remove_child(const SPtr<ObjectModel>& o)
+GraphModel::remove_child(const std::shared_ptr<ObjectModel>& o)
 {
 	assert(o->path().is_child_of(path()));
 	assert(o->parent().get() == this);
 
-	SPtr<PortModel> pm = dynamic_ptr_cast<PortModel>(o);
+	auto pm = std::dynamic_pointer_cast<PortModel>(o);
 	if (pm) {
 		remove_arcs_on(pm);
 		remove_port(pm);
 	}
 
-	SPtr<BlockModel> bm = dynamic_ptr_cast<BlockModel>(o);
+	auto bm = std::dynamic_pointer_cast<BlockModel>(o);
 	if (bm) {
 		_signal_removed_block.emit(bm);
 	}
@@ -66,7 +71,7 @@ GraphModel::remove_child(const SPtr<ObjectModel>& o)
 }
 
 void
-GraphModel::remove_arcs_on(const SPtr<PortModel>& p)
+GraphModel::remove_arcs_on(const std::shared_ptr<PortModel>& p)
 {
 	// Remove any connections which referred to this object,
 	// since they can't possibly exist anymore
@@ -74,7 +79,7 @@ GraphModel::remove_arcs_on(const SPtr<PortModel>& p)
 		auto next = j;
 		++next;
 
-		SPtr<ArcModel> arc = dynamic_ptr_cast<ArcModel>(j->second);
+		auto arc = std::dynamic_pointer_cast<ArcModel>(j->second);
 		if (arc->tail_path().parent() == p->path()
 		    || arc->tail_path() == p->path()
 		    || arc->head_path().parent() == p->path()
@@ -97,14 +102,14 @@ GraphModel::clear()
 	assert(_ports.empty());
 }
 
-SPtr<ArcModel>
+std::shared_ptr<ArcModel>
 GraphModel::get_arc(const Node* tail, const Node* head)
 {
 	auto i = _arcs.find(std::make_pair(tail, head));
 	if (i != _arcs.end()) {
-		return dynamic_ptr_cast<ArcModel>(i->second);
+		return std::dynamic_pointer_cast<ArcModel>(i->second);
 	} else {
-		return SPtr<ArcModel>();
+		return nullptr;
 	}
 }
 
@@ -116,7 +121,7 @@ GraphModel::get_arc(const Node* tail, const Node* head)
  * this graph is a fatal error.
  */
 void
-GraphModel::add_arc(const SPtr<ArcModel>& arc)
+GraphModel::add_arc(const std::shared_ptr<ArcModel>& arc)
 {
 	// Store should have 'resolved' the connection already
 	assert(arc);
@@ -130,7 +135,7 @@ GraphModel::add_arc(const SPtr<ArcModel>& arc)
 	assert(arc->head()->parent().get() == this
 	       || arc->head()->parent()->parent().get() == this);
 
-	SPtr<ArcModel> existing = get_arc(
+	std::shared_ptr<ArcModel> existing = get_arc(
 		arc->tail().get(), arc->head().get());
 
 	if (existing) {
@@ -148,7 +153,7 @@ GraphModel::remove_arc(const Node* tail, const Node* head)
 {
 	auto i = _arcs.find(std::make_pair(tail, head));
 	if (i != _arcs.end()) {
-		SPtr<ArcModel> arc = dynamic_ptr_cast<ArcModel>(i->second);
+		auto arc = std::dynamic_pointer_cast<ArcModel>(i->second);
 		_signal_removed_arc.emit(arc);
 		_arcs.erase(i);
 	}

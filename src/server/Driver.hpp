@@ -17,18 +17,25 @@
 #ifndef INGEN_ENGINE_DRIVER_HPP
 #define INGEN_ENGINE_DRIVER_HPP
 
-#include "DuplexPort.hpp"
-#include "EnginePort.hpp"
+#include "types.hpp"
 
+#include "ingen/URI.hpp"
 #include "raul/Noncopyable.hpp"
 
-namespace Raul { class Path; }
+#include <cstddef>
+
+namespace raul { class Path; }
 
 namespace ingen {
+
+class Atom;
+
 namespace server {
 
+class Buffer;
 class DuplexPort;
 class EnginePort;
+class RunContext;
 
 /** Engine driver base class.
  *
@@ -37,7 +44,7 @@ class EnginePort;
  *
  * \ingroup engine
  */
-class Driver : public Raul::Noncopyable {
+class Driver : public raul::Noncopyable {
 public:
 	virtual ~Driver() = default;
 
@@ -53,10 +60,10 @@ public:
 	virtual EnginePort* create_port(DuplexPort* graph_port) = 0;
 
 	/** Find a system port by path. */
-	virtual EnginePort* get_port(const Raul::Path& path) = 0;
+	virtual EnginePort* get_port(const raul::Path& path) = 0;
 
 	/** Add a system visible port (e.g. a port on the root graph). */
-	virtual void add_port(RunContext& context, EnginePort* port) = 0;
+	virtual void add_port(RunContext& ctx, EnginePort* port) = 0;
 
 	/** Remove a system visible port.
 	 *
@@ -64,7 +71,7 @@ public:
 	 * destroy the port.  To actually remove the system port, unregister_port()
 	 * must be called later in another thread.
 	 */
-	virtual void remove_port(RunContext& context, EnginePort* port) = 0;
+	virtual void remove_port(RunContext& ctx, EnginePort* port) = 0;
 
 	/** Return true iff driver supports dynamic adding/removing of ports. */
 	virtual bool dynamic_ports() const { return false; }
@@ -76,11 +83,11 @@ public:
 	virtual void unregister_port(EnginePort& port) = 0;
 
 	/** Rename a system visible port. */
-	virtual void rename_port(const Raul::Path& old_path,
-	                         const Raul::Path& new_path) = 0;
+	virtual void rename_port(const raul::Path& old_path,
+	                         const raul::Path& new_path) = 0;
 
 	/** Apply a system visible port property. */
-	virtual void port_property(const Raul::Path& path,
+	virtual void port_property(const raul::Path& path,
 	                           const URI&        uri,
 	                           const Atom&       value) = 0;
 
@@ -97,8 +104,7 @@ public:
 	virtual SampleCount frame_time() const = 0;
 
 	/** Append time events for this cycle to `buffer`. */
-	virtual void append_time_events(RunContext& context,
-	                                Buffer&     buffer) = 0;
+	virtual void append_time_events(RunContext& ctx, Buffer& buffer) = 0;
 
 	/** Return the real-time priority of the audio thread, or -1. */
 	virtual int real_time_priority() = 0;

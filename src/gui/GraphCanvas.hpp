@@ -17,27 +17,48 @@
 #ifndef INGEN_GUI_GRAPHCANVAS_HPP
 #define INGEN_GUI_GRAPHCANVAS_HPP
 
-#include "NodeModule.hpp"
-
 #include "ganv/Canvas.hpp"
-#include "ganv/Module.hpp"
-#include "ingen/Node.hpp"
-#include "ingen/client/ArcModel.hpp"
-#include "ingen/types.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URI.hpp"
 #include "lilv/lilv.h"
 #include "raul/Path.hpp"
 
-#include <string>
+#include <gdk/gdk.h>
+
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
+#include <string>
+#include <utility>
+
+namespace Ganv {
+class Module;
+class Node;
+class Port;
+} // namespace Ganv
+
+namespace Gtk {
+class CheckMenuItem;
+class Menu;
+class MenuItem;
+} // namespace Gtk
 
 namespace ingen {
 
-namespace client { class GraphModel; }
+namespace client {
+class ArcModel;
+class BlockModel;
+class GraphModel;
+class ObjectModel;
+class PluginModel;
+class PortModel;
+} // namespace client
 
 namespace gui {
 
-class NodeModule;
+class App;
 class PluginMenu;
 
 /** Graph canvas widget.
@@ -47,12 +68,12 @@ class PluginMenu;
 class GraphCanvas : public Ganv::Canvas
 {
 public:
-	GraphCanvas(App&                           app,
-	            SPtr<const client::GraphModel> graph,
-	            int                            width,
-	            int                            height);
+	GraphCanvas(App&                                      app,
+	            std::shared_ptr<const client::GraphModel> graph,
+	            int                                       width,
+	            int                                       height);
 
-	virtual ~GraphCanvas() {}
+	~GraphCanvas() override = default;
 
 	App& app() { return _app; }
 
@@ -61,14 +82,14 @@ public:
 	void show_port_names(bool b);
 	bool show_port_names() const { return _show_port_names; }
 
-	void add_plugin(const SPtr<client::PluginModel>& p);
+	void add_plugin(const std::shared_ptr<client::PluginModel>& p);
 	void remove_plugin(const URI& uri);
-	void add_block(const SPtr<const client::BlockModel>& bm);
-	void remove_block(const SPtr<const client::BlockModel>& bm);
-	void add_port(const SPtr<const client::PortModel>& pm);
-	void remove_port(const SPtr<const client::PortModel>& pm);
-	void connection(const SPtr<const client::ArcModel>& arc);
-	void disconnection(const SPtr<const client::ArcModel>& arc);
+	void add_block(const std::shared_ptr<const client::BlockModel>& bm);
+	void remove_block(const std::shared_ptr<const client::BlockModel>& bm);
+	void add_port(const std::shared_ptr<const client::PortModel>& pm);
+	void remove_port(const std::shared_ptr<const client::PortModel>& pm);
+	void connection(const std::shared_ptr<const client::ArcModel>& arc);
+	void disconnection(const std::shared_ptr<const client::ArcModel>& arc);
 
 	void get_new_module_location(double& x, double& y);
 
@@ -96,7 +117,7 @@ private:
 	void menu_new_graph();
 	void menu_load_graph();
 	void menu_properties();
-	void load_plugin(WPtr<client::PluginModel> weak_plugin);
+	void load_plugin(const std::weak_ptr<client::PluginModel>& weak_plugin);
 
 	void build_menus();
 
@@ -106,7 +127,7 @@ private:
 
 	Properties get_initial_data(Resource::Graph ctx=Resource::Graph::DEFAULT);
 
-	Ganv::Port* get_port_view(const SPtr<client::PortModel>& port);
+	Ganv::Port* get_port_view(const std::shared_ptr<client::PortModel>& port);
 
 	void connect(Ganv::Node* tail,
 	             Ganv::Node* head);
@@ -114,10 +135,10 @@ private:
 	void disconnect(Ganv::Node* tail,
 	                Ganv::Node* head);
 
-	App&                           _app;
-	SPtr<const client::GraphModel> _graph;
+	App&                                      _app;
+	std::shared_ptr<const client::GraphModel> _graph;
 
-	using Views = std::map<SPtr<const client::ObjectModel>, Ganv::Module*>;
+	using Views = std::map<std::shared_ptr<const client::ObjectModel>, Ganv::Module*>;
 	Views _views;
 
 	int                 _auto_position_count;
@@ -128,28 +149,28 @@ private:
 	int _paste_count;
 
 	// Track pasted objects so they can be selected when they arrive
-	std::set<Raul::Path> _pastees;
+	std::set<raul::Path> _pastees;
 
-	Gtk::Menu*          _menu;
-	Gtk::Menu*          _internal_menu;
-	PluginMenu*         _plugin_menu;
-	Gtk::MenuItem*      _menu_add_audio_input;
-	Gtk::MenuItem*      _menu_add_audio_output;
-	Gtk::MenuItem*      _menu_add_control_input;
-	Gtk::MenuItem*      _menu_add_control_output;
-	Gtk::MenuItem*      _menu_add_cv_input;
-	Gtk::MenuItem*      _menu_add_cv_output;
-	Gtk::MenuItem*      _menu_add_event_input;
-	Gtk::MenuItem*      _menu_add_event_output;
-	Gtk::MenuItem*      _menu_load_plugin;
-	Gtk::MenuItem*      _menu_load_graph;
-	Gtk::MenuItem*      _menu_new_graph;
-	Gtk::MenuItem*      _menu_properties;
-	Gtk::CheckMenuItem* _menu_edit;
+	Gtk::Menu*          _menu                    = nullptr;
+	Gtk::Menu*          _internal_menu           = nullptr;
+	PluginMenu*         _plugin_menu             = nullptr;
+	Gtk::MenuItem*      _menu_add_audio_input    = nullptr;
+	Gtk::MenuItem*      _menu_add_audio_output   = nullptr;
+	Gtk::MenuItem*      _menu_add_control_input  = nullptr;
+	Gtk::MenuItem*      _menu_add_control_output = nullptr;
+	Gtk::MenuItem*      _menu_add_cv_input       = nullptr;
+	Gtk::MenuItem*      _menu_add_cv_output      = nullptr;
+	Gtk::MenuItem*      _menu_add_event_input    = nullptr;
+	Gtk::MenuItem*      _menu_add_event_output   = nullptr;
+	Gtk::MenuItem*      _menu_load_plugin        = nullptr;
+	Gtk::MenuItem*      _menu_load_graph         = nullptr;
+	Gtk::MenuItem*      _menu_new_graph          = nullptr;
+	Gtk::MenuItem*      _menu_properties         = nullptr;
+	Gtk::CheckMenuItem* _menu_edit               = nullptr;
 
-	bool _human_names;
-	bool _show_port_names;
-	bool _menu_dirty;
+	bool _human_names = true;
+	bool _show_port_names = true;
+	bool _menu_dirty = false;
 };
 
 } // namespace gui

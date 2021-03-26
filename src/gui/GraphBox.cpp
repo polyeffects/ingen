@@ -14,6 +14,8 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "GraphBox.hpp"
+
 #include "App.hpp"
 #include "BreadCrumbs.hpp"
 #include "ConnectWindow.hpp"
@@ -21,38 +23,92 @@
 #include "GraphTreeWindow.hpp"
 #include "GraphView.hpp"
 #include "GraphWindow.hpp"
-#include "LoadGraphWindow.hpp"
-#include "LoadPluginWindow.hpp"
 #include "MessagesWindow.hpp"
-#include "NewSubgraphWindow.hpp"
-#include "Style.hpp"
 #include "ThreadedLoader.hpp"
 #include "WidgetFactory.hpp"
 #include "WindowFactory.hpp"
-#include "ingen_config.h"
 
+#include "ganv/canvas.h"
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
-#include "ingen/Log.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
+#include "ingen/client/BlockModel.hpp"
 #include "ingen/client/ClientStore.hpp"
 #include "ingen/client/GraphModel.hpp"
+#include "ingen/client/ObjectModel.hpp"
+#include "ingen/client/PluginModel.hpp"
+#include "ingen/client/PortModel.hpp"
 #include "ingen/fmt.hpp"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
-#include <boost/format.hpp>
+#include <gdk/gdk.h>
 #include <glib/gstdio.h>
+#include <glibmm/convert.h>
 #include <glibmm/fileutils.h>
+#include <glibmm/miscutils.h>
+#include <glibmm/propertyproxy.h>
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/alignment.h>
+#include <gtkmm/box.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/checkmenuitem.h>
+#include <gtkmm/clipboard.h>
+#include <gtkmm/container.h>
+#include <gtkmm/dialog.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/filechooser.h>
+#include <gtkmm/filechooserdialog.h>
+#include <gtkmm/filefilter.h>
+#include <gtkmm/label.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/messagedialog.h>
+#include <gtkmm/object.h>
+#include <gtkmm/paned.h>
+#include <gtkmm/scrolledwindow.h>
+#include <gtkmm/statusbar.h>
 #include <gtkmm/stock.h>
+#include <gtkmm/textbuffer.h>
+#include <gtkmm/textview.h>
+#include <gtkmm/toolitem.h>
+#include <gtkmm/widget.h>
+#include <sigc++/adaptors/retype_return.h>
+#include <sigc++/connection.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
+
 #ifdef HAVE_WEBKIT
 #include <webkit/webkit.h>
 #endif
 
 #include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <limits>
+#include <map>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace ingen {
 
-using namespace client;
+using client::BlockModel;
+using client::GraphModel;
+using client::ObjectModel;
+using client::PluginModel;
+using client::PortModel;
 
 namespace gui {
 
@@ -63,11 +119,6 @@ static const int STATUS_CONTEXT_HOVER  = 2;
 GraphBox::GraphBox(BaseObjectType*                   cobject,
                    const Glib::RefPtr<Gtk::Builder>& xml)
 	: Gtk::VBox(cobject)
-	, _app(nullptr)
-	, _window(nullptr)
-	, _breadcrumbs(nullptr)
-	, _has_shown_documentation(false)
-	, _enable_signal(true)
 {
 	property_visible() = false;
 
@@ -194,21 +245,21 @@ GraphBox::~GraphBox()
 	delete _breadcrumbs;
 }
 
-SPtr<GraphBox>
-GraphBox::create(App& app, SPtr<const GraphModel> graph)
+std::shared_ptr<GraphBox>
+GraphBox::create(App& app, const std::shared_ptr<const GraphModel>& graph)
 {
 	GraphBox* result = nullptr;
 	Glib::RefPtr<Gtk::Builder> xml = WidgetFactory::create("graph_win");
 	xml->get_widget_derived("graph_win_vbox", result);
 	result->init_box(app);
-	result->set_graph(graph, SPtr<GraphView>());
+	result->set_graph(graph, nullptr);
 
 	if (app.is_plugin()) {
 		result->_menu_close->set_sensitive(false);
 		result->_menu_quit->set_sensitive(false);
 	}
 
-	return SPtr<GraphBox>(result);
+	return std::shared_ptr<GraphBox>(result);
 }
 
 void
@@ -248,13 +299,14 @@ GraphBox::set_status_text(const std::string& text)
 }
 
 void
-GraphBox::set_graph_from_path(const Raul::Path& path, SPtr<GraphView> view)
+GraphBox::set_graph_from_path(const raul::Path&                 path,
+                              const std::shared_ptr<GraphView>& view)
 {
 	if (view) {
 		assert(view->graph()->path() == path);
 		_app->window_factory()->present_graph(view->graph(), _window, view);
 	} else {
-		SPtr<const GraphModel> model = dynamic_ptr_cast<const GraphModel>(
+		auto model = std::dynamic_pointer_cast<const GraphModel>(
 			_app->store()->object(path));
 		if (model) {
 			_app->window_factory()->present_graph(model, _window);
@@ -267,8 +319,8 @@ GraphBox::set_graph_from_path(const Raul::Path& path, SPtr<GraphView> view)
  * If `view` is null, a new view will be created.
  */
 void
-GraphBox::set_graph(SPtr<const GraphModel> graph,
-                    SPtr<GraphView>        view)
+GraphBox::set_graph(const std::shared_ptr<const GraphModel>& graph,
+                    const std::shared_ptr<GraphView>&        view)
 {
 	if (!graph || graph == _graph) {
 		return;
@@ -307,11 +359,11 @@ GraphBox::set_graph(SPtr<const GraphModel> graph,
 
 	// Add view to our alignment
 	if (_view->get_parent()) {
-		_view->get_parent()->remove(*_view.get());
+		_view->get_parent()->remove(*_view);
 	}
 
 	_alignment->remove();
-	_alignment->add(*_view.get());
+	_alignment->add(*_view);
 
 	if (_breadcrumbs->get_parent()) {
 		_breadcrumbs->get_parent()->remove(*_breadcrumbs);
@@ -355,7 +407,7 @@ GraphBox::set_graph(SPtr<const GraphModel> graph,
 }
 
 void
-GraphBox::graph_port_added(SPtr<const PortModel> port)
+GraphBox::graph_port_added(const std::shared_ptr<const PortModel>& port)
 {
 	if (port->is_input() && _app->can_control(port.get())) {
 		_menu_view_control_window->property_sensitive() = true;
@@ -363,7 +415,7 @@ GraphBox::graph_port_added(SPtr<const PortModel> port)
 }
 
 void
-GraphBox::graph_port_removed(SPtr<const PortModel> port)
+GraphBox::graph_port_removed(const std::shared_ptr<const PortModel>& port)
 {
 	if (!(port->is_input() && _app->can_control(port.get()))) {
 		return;
@@ -425,7 +477,7 @@ GraphBox::show_status(const ObjectModel* model)
 		show_port_status(port, port->value());
 
 	} else if ((block = dynamic_cast<const BlockModel*>(model))) {
-		const PluginModel* plugin = dynamic_cast<const PluginModel*>(block->plugin());
+		const auto* plugin = dynamic_cast<const PluginModel*>(block->plugin());
 		if (plugin) {
 			msg << fmt(" (%1%)", plugin->human_name());
 		}
@@ -441,7 +493,7 @@ GraphBox::show_port_status(const PortModel* port, const Atom& value)
 
 	const BlockModel* parent = dynamic_cast<const BlockModel*>(port->parent().get());
 	if (parent) {
-		const PluginModel* plugin = dynamic_cast<const PluginModel*>(parent->plugin());
+		const auto* plugin = dynamic_cast<const PluginModel*>(parent->plugin());
 		if (plugin) {
 			const std::string& human_name = plugin->port_human_name(port->index());
 			if (!human_name.empty()) {
@@ -591,8 +643,8 @@ GraphBox::event_save_as()
 			filename += ".ingen";
 			basename += ".ingen";
 		} else if (filename.substr(filename.length() - 4) == ".ttl") {
-			const Glib::ustring dir = Glib::path_get_dirname(filename);
-			if (dir.substr(dir.length() - 6) != ".ingen") {
+			const Glib::ustring dirname = Glib::path_get_dirname(filename);
+			if (dirname.substr(dirname.length() - 6) != ".ingen") {
 				error("<b>File does not appear to be in an Ingen bundle.");
 			}
 		} else if (filename.substr(filename.length() - 6) != ".ingen") {
@@ -602,7 +654,7 @@ GraphBox::event_save_as()
 
 		const std::string symbol(basename.substr(0, basename.find('.')));
 
-		if (!Raul::Symbol::is_valid(symbol)) {
+		if (!raul::Symbol::is_valid(symbol)) {
 			error(
 				"<b>Ingen bundle names must be valid symbols.</b>",
 				"All characters must be _, a-z, A-Z, or 0-9, but the first may not be 0-9.");
@@ -680,8 +732,8 @@ GraphBox::event_export_image()
 		}
 	}
 
-	Gtk::CheckButton* bg_but = new Gtk::CheckButton("Draw _Background", true);
-	Gtk::Alignment*   extra  = new Gtk::Alignment(1.0, 0.5, 0.0, 0.0);
+	auto* bg_but = new Gtk::CheckButton("Draw _Background", true);
+	auto* extra  = new Gtk::Alignment(1.0, 0.5, 0.0, 0.0);
 	bg_but->set_active(true);
 	extra->add(*Gtk::manage(bg_but));
 	extra->show_all();
@@ -813,7 +865,9 @@ GraphBox::event_arrange()
 void
 GraphBox::event_parent_activated()
 {
-	SPtr<client::GraphModel> parent = dynamic_ptr_cast<client::GraphModel>(_graph->parent());
+	auto parent =
+	    std::dynamic_pointer_cast<client::GraphModel>(_graph->parent());
+
 	if (parent) {
 		_app->window_factory()->present_graph(parent, _window);
 	}
@@ -873,7 +927,8 @@ GraphBox::event_animate_signals_toggled()
 	_app->interface()->set_property(
 		URI("ingen:/clients/this"),
 		_app->uris().ingen_broadcast,
-		_app->forge().make((bool)_menu_animate_signals->get_active()));
+		_app->forge().make(
+			static_cast<bool>(_menu_animate_signals->get_active())));
 }
 
 void

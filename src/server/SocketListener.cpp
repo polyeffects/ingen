@@ -19,8 +19,10 @@
 #include "Engine.hpp"
 #include "SocketServer.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/World.hpp"
 #include "raul/Socket.hpp"
 
@@ -33,6 +35,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -52,9 +55,9 @@ get_link_target(const char* link_path)
 	}
 
 	// Allocate buffer and read link target
-	char* target = (char*)calloc(1, link_stat.st_size + 1);
+	char* target = static_cast<char*>(calloc(1, link_stat.st_size + 1));
 	if (readlink(link_path, target, link_stat.st_size) != -1) {
-		const std::string result(target);
+		std::string result(target);
 		free(target);
 		return result;
 	}
@@ -64,13 +67,13 @@ get_link_target(const char* link_path)
 }
 
 static void ingen_listen(Engine*       engine,
-                         Raul::Socket* unix_sock,
-                         Raul::Socket* net_sock);
+                         raul::Socket* unix_sock,
+                         raul::Socket* net_sock);
 
 
 SocketListener::SocketListener(Engine& engine)
-	: unix_sock(Raul::Socket::Type::UNIX)
-	, net_sock(Raul::Socket::Type::TCP)
+	: unix_sock(raul::Socket::Type::UNIX)
+	, net_sock(raul::Socket::Type::TCP)
 	, thread(new std::thread(ingen_listen, &engine, &unix_sock, &net_sock))
 {}
 
@@ -82,7 +85,7 @@ SocketListener::~SocketListener() {
 }
 
 static void
-ingen_listen(Engine* engine, Raul::Socket* unix_sock, Raul::Socket* net_sock)
+ingen_listen(Engine* engine, raul::Socket* unix_sock, raul::Socket* net_sock)
 {
 	ingen::World& world = engine->world();
 
@@ -170,14 +173,14 @@ ingen_listen(Engine* engine, Raul::Socket* unix_sock, Raul::Socket* net_sock)
 		}
 
 		if (pfds[0].revents & POLLIN) {
-			SPtr<Raul::Socket> conn = unix_sock->accept();
+			auto conn = unix_sock->accept();
 			if (conn) {
 				new SocketServer(world, *engine, conn);
 			}
 		}
 
 		if (pfds[1].revents & POLLIN) {
-			SPtr<Raul::Socket> conn = net_sock->accept();
+			auto conn = net_sock->accept();
 			if (conn) {
 				new SocketServer(world, *engine, conn);
 			}

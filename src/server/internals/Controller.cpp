@@ -14,37 +14,48 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "BlockImpl.hpp"
 #include "Buffer.hpp"
-#include "Engine.hpp"
+#include "BufferFactory.hpp"
+#include "BufferRef.hpp"
 #include "InputPort.hpp"
 #include "InternalPlugin.hpp"
 #include "OutputPort.hpp"
-#include "PostProcessor.hpp"
+#include "PortType.hpp"
 #include "RunContext.hpp"
-#include "util.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
 #include "internals/Controller.hpp"
+#include "lv2/atom/atom.h"
 #include "lv2/atom/util.h"
 #include "lv2/midi/midi.h"
+#include "raul/Array.hpp"
+#include "raul/Maid.hpp"
+#include "raul/Symbol.hpp"
 
 #include <cassert>
 #include <cmath>
 #include <initializer_list>
+#include <memory>
 
 namespace ingen {
 namespace server {
+
+class GraphImpl;
+
 namespace internals {
 
 InternalPlugin* ControllerNode::internal_plugin(URIs& uris) {
 	return new InternalPlugin(
-		uris, URI(NS_INTERNALS "Controller"), Raul::Symbol("controller"));
+		uris, URI(NS_INTERNALS "Controller"), raul::Symbol("controller"));
 }
 
 ControllerNode::ControllerNode(InternalPlugin*      plugin,
                                BufferFactory&       bufs,
-                               const Raul::Symbol&  symbol,
+                               const raul::Symbol&  symbol,
                                bool                 polyphonic,
                                GraphImpl*           parent,
                                SampleRate           srate)
@@ -58,21 +69,21 @@ ControllerNode::ControllerNode(InternalPlugin*      plugin,
 	const Atom one        = bufs.forge().make(1.0f);
 	const Atom atom_Float = bufs.forge().make_urid(URI(LV2_ATOM__Float));
 
-	_midi_in_port = new InputPort(bufs, this, Raul::Symbol("input"), 0, 1,
+	_midi_in_port = new InputPort(bufs, this, raul::Symbol("input"), 0, 1,
 	                              PortType::ATOM, uris.atom_Sequence, Atom());
 	_midi_in_port->set_property(uris.lv2_name, bufs.forge().alloc("Input"));
 	_midi_in_port->set_property(uris.atom_supports,
 	                            bufs.forge().make_urid(uris.midi_MidiEvent));
 	_ports->at(0) = _midi_in_port;
 
-	_midi_out_port = new OutputPort(bufs, this, Raul::Symbol("event"), 1, 1,
+	_midi_out_port = new OutputPort(bufs, this, raul::Symbol("event"), 1, 1,
 	                                PortType::ATOM, uris.atom_Sequence, Atom());
 	_midi_out_port->set_property(uris.lv2_name, bufs.forge().alloc("Event"));
 	_midi_out_port->set_property(uris.atom_supports,
 	                             bufs.forge().make_urid(uris.midi_MidiEvent));
 	_ports->at(1) = _midi_out_port;
 
-	_param_port = new InputPort(bufs, this, Raul::Symbol("controller"), 2, 1,
+	_param_port = new InputPort(bufs, this, raul::Symbol("controller"), 2, 1,
 	                            PortType::ATOM, uris.atom_Sequence, zero);
 	_param_port->set_property(uris.atom_supports, atom_Float);
 	_param_port->set_property(uris.lv2_minimum, zero);
@@ -81,26 +92,26 @@ ControllerNode::ControllerNode(InternalPlugin*      plugin,
 	_param_port->set_property(uris.lv2_name, bufs.forge().alloc("Controller"));
 	_ports->at(2) = _param_port;
 
-	_log_port = new InputPort(bufs, this, Raul::Symbol("logarithmic"), 3, 1,
+	_log_port = new InputPort(bufs, this, raul::Symbol("logarithmic"), 3, 1,
 	                          PortType::ATOM, uris.atom_Sequence, zero);
 	_log_port->set_property(uris.atom_supports, atom_Float);
 	_log_port->set_property(uris.lv2_portProperty, uris.lv2_toggled);
 	_log_port->set_property(uris.lv2_name, bufs.forge().alloc("Logarithmic"));
 	_ports->at(3) = _log_port;
 
-	_min_port = new InputPort(bufs, this, Raul::Symbol("minimum"), 4, 1,
+	_min_port = new InputPort(bufs, this, raul::Symbol("minimum"), 4, 1,
 	                          PortType::ATOM, uris.atom_Sequence, zero);
 	_min_port->set_property(uris.atom_supports, atom_Float);
 	_min_port->set_property(uris.lv2_name, bufs.forge().alloc("Minimum"));
 	_ports->at(4) = _min_port;
 
-	_max_port = new InputPort(bufs, this, Raul::Symbol("maximum"), 5, 1,
+	_max_port = new InputPort(bufs, this, raul::Symbol("maximum"), 5, 1,
 	                          PortType::ATOM, uris.atom_Sequence, one);
 	_max_port->set_property(uris.atom_supports, atom_Float);
 	_max_port->set_property(uris.lv2_name, bufs.forge().alloc("Maximum"));
 	_ports->at(5) = _max_port;
 
-	_audio_port = new OutputPort(bufs, this, Raul::Symbol("output"), 6, 1,
+	_audio_port = new OutputPort(bufs, this, raul::Symbol("output"), 6, 1,
 	                             PortType::ATOM, uris.atom_Sequence, zero);
 	_audio_port->set_property(uris.atom_supports, atom_Float);
 	_audio_port->set_property(uris.lv2_name, bufs.forge().alloc("Output"));
@@ -108,17 +119,18 @@ ControllerNode::ControllerNode(InternalPlugin*      plugin,
 }
 
 void
-ControllerNode::run(RunContext& context)
+ControllerNode::run(RunContext& ctx)
 {
-	const BufferRef    midi_in  = _midi_in_port->buffer(0);
-	LV2_Atom_Sequence* seq      = midi_in->get<LV2_Atom_Sequence>();
-	const BufferRef    midi_out = _midi_out_port->buffer(0);
+	const BufferRef midi_in  = _midi_in_port->buffer(0);
+	auto*           seq      = midi_in->get<LV2_Atom_Sequence>();
+	const BufferRef midi_out = _midi_out_port->buffer(0);
+
 	LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
-		const uint8_t* buf = (const uint8_t*)LV2_ATOM_BODY(&ev->body);
+		const auto* buf = static_cast<const uint8_t*>(LV2_ATOM_BODY_CONST(&ev->body));
 		if (ev->body.type == _midi_in_port->bufs().uris().midi_MidiEvent &&
 		    ev->body.size >= 3 &&
 		    lv2_midi_message_type(buf) == LV2_MIDI_MSG_CONTROLLER) {
-			if (control(context, buf[1], buf[2], ev->time.frames + context.start())) {
+			if (control(ctx, buf[1], buf[2], ev->time.frames + ctx.start())) {
 				midi_out->append_event(ev->time.frames, &ev->body);
 			}
 		}
@@ -126,15 +138,15 @@ ControllerNode::run(RunContext& context)
 }
 
 bool
-ControllerNode::control(RunContext& context, uint8_t control_num, uint8_t val, FrameTime time)
+ControllerNode::control(RunContext& ctx, uint8_t control_num, uint8_t val, FrameTime time)
 {
-	assert(time >= context.start() && time <= context.end());
-	const uint32_t offset = time - context.start();
+	assert(time >= ctx.start() && time <= ctx.end());
+	const uint32_t offset = time - ctx.start();
 
 	const Sample nval = (val / 127.0f); // normalized [0, 1]
 
 	if (_learning) {
-		_param_port->set_control_value(context, time, control_num);
+		_param_port->set_control_value(ctx, time, control_num);
 		_param_port->force_monitor_update();
 		_learning = false;
 	} else {
@@ -153,21 +165,21 @@ ControllerNode::control(RunContext& context, uint8_t control_num, uint8_t val, F
 	const Sample max_port_val = _max_port->buffer(0)->value_at(offset);
 	const Sample log_port_val = _log_port->buffer(0)->value_at(offset);
 
-	Sample scaled_value;
+	Sample scaled_value = 0.0f;
 	if (log_port_val > 0.0f) {
 		// haaaaack, stupid negatives and logarithms
-		Sample log_offset = 0;
+		Sample log_offset = 0.0f;
 		if (min_port_val < 0) {
-			log_offset = fabs(min_port_val);
+			log_offset = fabsf(min_port_val);
 		}
-		const Sample min = log(min_port_val + 1 + log_offset);
-		const Sample max = log(max_port_val + 1 + log_offset);
+		const Sample min = logf(min_port_val + 1 + log_offset);
+		const Sample max = logf(max_port_val + 1 + log_offset);
 		scaled_value = expf(nval * (max - min) + min) - 1 - log_offset;
 	} else {
 		scaled_value = ((nval) * (max_port_val - min_port_val)) + min_port_val;
 	}
 
-	_audio_port->set_control_value(context, time, scaled_value);
+	_audio_port->set_control_value(ctx, time, scaled_value);
 
 	return true;
 }

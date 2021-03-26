@@ -17,23 +17,35 @@
 #ifndef INGEN_EVENTS_DELETE_HPP
 #define INGEN_EVENTS_DELETE_HPP
 
+#include "BlockImpl.hpp"
 #include "ControlBindings.hpp"
 #include "Event.hpp"
 #include "GraphImpl.hpp"
+#include "types.hpp"
 
+#include "ingen/Message.hpp"
 #include "ingen/Store.hpp"
+#include "raul/Maid.hpp"
+#include "raul/Path.hpp"
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
 class CompiledGraph;
 class DuplexPort;
+class Engine;
 class EnginePort;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -45,32 +57,32 @@ class DisconnectAll;
 class Delete : public Event
 {
 public:
-	Delete(Engine&                engine,
-	       const SPtr<Interface>& client,
-	       FrameTime              timestamp,
-	       const ingen::Del&      msg);
+	Delete(Engine&                           engine,
+	       const std::shared_ptr<Interface>& client,
+	       FrameTime                         timestamp,
+	       const ingen::Del&                 msg);
 
-	~Delete();
+	~Delete() override;
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
 private:
 	using IndexChange  = std::pair<uint32_t, uint32_t>;
-	using IndexChanges = std::map<Raul::Path, IndexChange>;
+	using IndexChanges = std::map<raul::Path, IndexChange>;
 
-	const ingen::Del        _msg;
-	Raul::Path              _path;
-	SPtr<BlockImpl>         _block; ///< Non-null iff a block
-	SPtr<DuplexPort>        _port; ///< Non-null iff a port
-	EnginePort*             _engine_port;
-	MPtr<GraphImpl::Ports>  _ports_array; ///< New (external) ports for Graph
-	MPtr<CompiledGraph>     _compiled_graph; ///< Graph's new process order
-	UPtr<DisconnectAll>     _disconnect_event;
-	Store::Objects          _removed_objects;
-	IndexChanges            _port_index_changes;
+	const ingen::Del                    _msg;
+	raul::Path                          _path;
+	std::shared_ptr<BlockImpl>          _block; ///< Non-null iff a block
+	std::shared_ptr<DuplexPort>         _port; ///< Non-null iff a port
+	EnginePort*                         _engine_port;
+	raul::managed_ptr<GraphImpl::Ports> _ports_array; ///< New (external) ports for Graph
+	raul::managed_ptr<CompiledGraph>    _compiled_graph; ///< Graph's new process order
+	std::unique_ptr<DisconnectAll>      _disconnect_event;
+	Store::Objects                      _removed_objects;
+	IndexChanges                        _port_index_changes;
 
 	std::vector<ControlBindings::Binding*> _removed_bindings;
 };

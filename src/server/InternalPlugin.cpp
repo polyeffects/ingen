@@ -22,26 +22,25 @@
 #include "internals/Note.hpp"
 #include "internals/Time.hpp"
 #include "internals/Trigger.hpp"
+#include "types.hpp"
 
 #include "ingen/URIs.hpp"
+
+#include <utility>
 
 namespace ingen {
 namespace server {
 
-using namespace internals;
-
-InternalPlugin::InternalPlugin(URIs&               uris,
-                               const URI&          uri,
-                               const Raul::Symbol& symbol)
-	: PluginImpl(uris, uris.ingen_Internal.urid, uri)
-	, _symbol(symbol)
+InternalPlugin::InternalPlugin(URIs& uris, const URI& uri, raul::Symbol symbol)
+    : PluginImpl(uris, uris.ingen_Internal.urid_atom(), uri)
+    , _symbol(std::move(symbol))
 {
 	set_property(uris.rdf_type, uris.ingen_Internal);
 }
 
 BlockImpl*
 InternalPlugin::instantiate(BufferFactory&      bufs,
-                            const Raul::Symbol& symbol,
+                            const raul::Symbol& symbol,
                             bool                polyphonic,
                             GraphImpl*          parent,
                             Engine&             engine,
@@ -50,15 +49,20 @@ InternalPlugin::instantiate(BufferFactory&      bufs,
 	const SampleCount srate = engine.sample_rate();
 
 	if (uri() == NS_INTERNALS "BlockDelay") {
-		return new BlockDelayNode(this, bufs, symbol, polyphonic, parent, srate);
+		return new internals::BlockDelayNode(
+		    this, bufs, symbol, polyphonic, parent, srate);
 	} else if (uri() == NS_INTERNALS "Controller") {
-		return new ControllerNode(this, bufs, symbol, polyphonic, parent, srate);
+		return new internals::ControllerNode(
+		    this, bufs, symbol, polyphonic, parent, srate);
 	} else if (uri() == NS_INTERNALS "Note") {
-		return new NoteNode(this, bufs, symbol, polyphonic, parent, srate);
+		return new internals::NoteNode(
+		    this, bufs, symbol, polyphonic, parent, srate);
 	} else if (uri() == NS_INTERNALS "Time") {
-		return new TimeNode(this, bufs, symbol, polyphonic, parent, srate);
+		return new internals::TimeNode(
+		    this, bufs, symbol, polyphonic, parent, srate);
 	} else if (uri() == NS_INTERNALS "Trigger") {
-		return new TriggerNode(this, bufs, symbol, polyphonic, parent, srate);
+		return new internals::TriggerNode(
+		    this, bufs, symbol, polyphonic, parent, srate);
 	} else {
 		return nullptr;
 	}

@@ -16,37 +16,49 @@
 
 #include "internals/Note.hpp"
 
+#include "BlockImpl.hpp"
 #include "Buffer.hpp"
+#include "BufferFactory.hpp"
+#include "BufferRef.hpp"
 #include "InputPort.hpp"
 #include "InternalPlugin.hpp"
 #include "OutputPort.hpp"
+#include "PortType.hpp"
 #include "RunContext.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
+#include "lv2/atom/atom.h"
 #include "lv2/atom/util.h"
 #include "lv2/midi/midi.h"
 #include "raul/Array.hpp"
 #include "raul/Maid.hpp"
+#include "raul/Symbol.hpp"
 
 #include <cassert>
 #include <cmath>
+#include <memory>
 #include <utility>
 
 // #define NOTE_DEBUG 1
 
 namespace ingen {
 namespace server {
+
+class GraphImpl;
+
 namespace internals {
 
 InternalPlugin* NoteNode::internal_plugin(URIs& uris) {
 	return new InternalPlugin(
-		uris, URI(NS_INTERNALS "Note"), Raul::Symbol("note"));
+		uris, URI(NS_INTERNALS "Note"), raul::Symbol("note"));
 }
 
 NoteNode::NoteNode(InternalPlugin*     plugin,
                    BufferFactory&      bufs,
-                   const Raul::Symbol& symbol,
+                   const raul::Symbol& symbol,
                    bool                polyphonic,
                    GraphImpl*          parent,
                    SampleRate          srate)
@@ -60,14 +72,14 @@ NoteNode::NoteNode(InternalPlugin*     plugin,
 	const Atom zero = bufs.forge().make(0.0f);
 	const Atom one  = bufs.forge().make(1.0f);
 
-	_midi_in_port = new InputPort(bufs, this, Raul::Symbol("input"), 0, 1,
+	_midi_in_port = new InputPort(bufs, this, raul::Symbol("input"), 0, 1,
 	                              PortType::ATOM, uris.atom_Sequence, Atom());
 	_midi_in_port->set_property(uris.lv2_name, bufs.forge().alloc("Input"));
 	_midi_in_port->set_property(uris.atom_supports,
 	                            bufs.forge().make_urid(uris.midi_MidiEvent));
 	_ports->at(0) = _midi_in_port;
 
-	_freq_port = new OutputPort(bufs, this, Raul::Symbol("frequency"), 1, _polyphony,
+	_freq_port = new OutputPort(bufs, this, raul::Symbol("frequency"), 1, _polyphony,
 	                            PortType::ATOM, uris.atom_Sequence,
 	                            bufs.forge().make(440.0f));
 	_freq_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
@@ -76,7 +88,7 @@ NoteNode::NoteNode(InternalPlugin*     plugin,
 	_freq_port->set_property(uris.lv2_maximum, bufs.forge().make(25088.0f));
 	_ports->at(1) = _freq_port;
 
-	_num_port = new OutputPort(bufs, this, Raul::Symbol("number"), 1, _polyphony,
+	_num_port = new OutputPort(bufs, this, raul::Symbol("number"), 1, _polyphony,
 	                           PortType::ATOM, uris.atom_Sequence, zero);
 	_num_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
 	_num_port->set_property(uris.lv2_minimum, zero);
@@ -85,7 +97,7 @@ NoteNode::NoteNode(InternalPlugin*     plugin,
 	_num_port->set_property(uris.lv2_name, bufs.forge().alloc("Number"));
 	_ports->at(2) = _num_port;
 
-	_vel_port = new OutputPort(bufs, this, Raul::Symbol("velocity"), 2, _polyphony,
+	_vel_port = new OutputPort(bufs, this, raul::Symbol("velocity"), 2, _polyphony,
 	                           PortType::ATOM, uris.atom_Sequence, zero);
 	_vel_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
 	_vel_port->set_property(uris.lv2_minimum, zero);
@@ -93,21 +105,21 @@ NoteNode::NoteNode(InternalPlugin*     plugin,
 	_vel_port->set_property(uris.lv2_name, bufs.forge().alloc("Velocity"));
 	_ports->at(3) = _vel_port;
 
-	_gate_port = new OutputPort(bufs, this, Raul::Symbol("gate"), 3, _polyphony,
+	_gate_port = new OutputPort(bufs, this, raul::Symbol("gate"), 3, _polyphony,
 	                            PortType::ATOM, uris.atom_Sequence, zero);
 	_gate_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
 	_gate_port->set_property(uris.lv2_portProperty, uris.lv2_toggled);
 	_gate_port->set_property(uris.lv2_name, bufs.forge().alloc("Gate"));
 	_ports->at(4) = _gate_port;
 
-	_trig_port = new OutputPort(bufs, this, Raul::Symbol("trigger"), 4, _polyphony,
+	_trig_port = new OutputPort(bufs, this, raul::Symbol("trigger"), 4, _polyphony,
 	                            PortType::ATOM, uris.atom_Sequence, zero);
 	_trig_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
 	_trig_port->set_property(uris.lv2_portProperty, uris.lv2_toggled);
 	_trig_port->set_property(uris.lv2_name, bufs.forge().alloc("Trigger"));
 	_ports->at(5) = _trig_port;
 
-	_bend_port = new OutputPort(bufs, this, Raul::Symbol("bend"), 5, _polyphony,
+	_bend_port = new OutputPort(bufs, this, raul::Symbol("bend"), 5, _polyphony,
 	                            PortType::ATOM, uris.atom_Sequence, zero);
 	_bend_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
 	_bend_port->set_property(uris.lv2_name, bufs.forge().alloc("Bender"));
@@ -116,7 +128,7 @@ NoteNode::NoteNode(InternalPlugin*     plugin,
 	_bend_port->set_property(uris.lv2_maximum, one);
 	_ports->at(6) = _bend_port;
 
-	_pressure_port = new OutputPort(bufs, this, Raul::Symbol("pressure"), 6, _polyphony,
+	_pressure_port = new OutputPort(bufs, this, raul::Symbol("pressure"), 6, _polyphony,
 	                            PortType::ATOM, uris.atom_Sequence, zero);
 	_pressure_port->set_property(uris.atom_supports, bufs.uris().atom_Float);
 	_pressure_port->set_property(uris.lv2_name, bufs.forge().alloc("Pressure"));
@@ -146,9 +158,9 @@ NoteNode::prepare_poly(BufferFactory& bufs, uint32_t poly)
 }
 
 bool
-NoteNode::apply_poly(RunContext& context, uint32_t poly)
+NoteNode::apply_poly(RunContext& ctx, uint32_t poly)
 {
-	if (!BlockImpl::apply_poly(context, poly)) {
+	if (!BlockImpl::apply_poly(ctx, poly)) {
 		return false;
 	}
 
@@ -162,50 +174,58 @@ NoteNode::apply_poly(RunContext& context, uint32_t poly)
 }
 
 void
-NoteNode::run(RunContext& context)
+NoteNode::run(RunContext& ctx)
 {
-	Buffer* const      midi_in = _midi_in_port->buffer(0).get();
-	LV2_Atom_Sequence* seq     = midi_in->get<LV2_Atom_Sequence>();
+	Buffer* const midi_in = _midi_in_port->buffer(0).get();
+	auto*         seq     = midi_in->get<LV2_Atom_Sequence>();
+
 	LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
-		const uint8_t*  buf  = (const uint8_t*)LV2_ATOM_BODY_CONST(&ev->body);
-		const FrameTime time = context.start() + (FrameTime)ev->time.frames;
+		const auto* buf =
+		    static_cast<const uint8_t*>(LV2_ATOM_BODY_CONST(&ev->body));
+
+		const FrameTime time =
+		    ctx.start() + static_cast<FrameTime>(ev->time.frames);
+
 		if (ev->body.type == _midi_in_port->bufs().uris().midi_MidiEvent &&
 		    ev->body.size >= 3) {
 			switch (lv2_midi_message_type(buf)) {
 			case LV2_MIDI_MSG_NOTE_ON:
 				if (buf[2] == 0) {
-					note_off(context, buf[1], time);
+					note_off(ctx, buf[1], time);
 				} else {
-					note_on(context, buf[1], buf[2], time);
+					note_on(ctx, buf[1], buf[2], time);
 				}
 				break;
 			case LV2_MIDI_MSG_NOTE_OFF:
-				note_off(context, buf[1], time);
+				note_off(ctx, buf[1], time);
 				break;
 			case LV2_MIDI_MSG_CONTROLLER:
 				switch (buf[1]) {
 				case LV2_MIDI_CTL_ALL_NOTES_OFF:
 				case LV2_MIDI_CTL_ALL_SOUNDS_OFF:
-					all_notes_off(context, time);
+					all_notes_off(ctx, time);
 					break;
 				case LV2_MIDI_CTL_SUSTAIN:
 					if (buf[2] > 63) {
-						sustain_on(context, time);
+						sustain_on(ctx, time);
 					} else {
-						sustain_off(context, time);
+						sustain_off(ctx, time);
 					}
 					break;
 				}
 				break;
 			case LV2_MIDI_MSG_BENDER:
-				bend(context, time, (((((uint16_t)buf[2] << 7) | buf[1]) - 8192.0f)
-				                     / 8192.0f));
+				bend(ctx,
+				     time,
+				     ((((static_cast<uint16_t>(buf[2]) << 7) | buf[1]) -
+				       8192.0f) /
+				      8192.0f));
 				break;
 			case LV2_MIDI_MSG_CHANNEL_PRESSURE:
-				channel_pressure(context, time, buf[1] / 127.0f);
+				channel_pressure(ctx, time, buf[1] / 127.0f);
 				break;
 			case LV2_MIDI_MSG_NOTE_PRESSURE:
-				note_pressure(context, time, buf[1], buf[2] / 127.0f);
+				note_pressure(ctx, time, buf[1], buf[2] / 127.0f);
 				break;
 			default:
 				break;
@@ -218,13 +238,13 @@ static inline float
 note_to_freq(uint8_t num)
 {
 	static const float A4 = 440.0f;
-	return A4 * powf(2.0f, (float)(num - 57.0f) / 12.0f);
+	return A4 * powf(2.0f, static_cast<float>(num - 57.0f) / 12.0f);
 }
 
 void
-NoteNode::note_on(RunContext& context, uint8_t note_num, uint8_t velocity, FrameTime time)
+NoteNode::note_on(RunContext& ctx, uint8_t note_num, uint8_t velocity, FrameTime time)
 {
-	assert(time >= context.start() && time <= context.end());
+	assert(time >= ctx.start() && time <= ctx.end());
 	assert(note_num <= 127);
 
 	Key*     key       = &_keys[note_num];
@@ -285,13 +305,13 @@ NoteNode::note_on(RunContext& context, uint8_t note_num, uint8_t velocity, Frame
 	assert(_keys[voice->note].state == Key::State::ON_ASSIGNED);
 	assert(_keys[voice->note].voice == voice_num);
 
-	_freq_port->set_voice_value(context, voice_num, time, note_to_freq(note_num));
-	_num_port->set_voice_value(context, voice_num, time, (float)note_num);
-	_vel_port->set_voice_value(context, voice_num, time, velocity / 127.0f);
-	_gate_port->set_voice_value(context, voice_num, time, 1.0f);
+	_freq_port->set_voice_value(ctx, voice_num, time, note_to_freq(note_num));
+	_num_port->set_voice_value(ctx, voice_num, time, static_cast<float>(note_num));
+	_vel_port->set_voice_value(ctx, voice_num, time, velocity / 127.0f);
+	_gate_port->set_voice_value(ctx, voice_num, time, 1.0f);
 	if (!double_trigger) {
-		_trig_port->set_voice_value(context, voice_num, time, 1.0f);
-		_trig_port->set_voice_value(context, voice_num, time + 1, 0.0f);
+		_trig_port->set_voice_value(ctx, voice_num, time, 1.0f);
+		_trig_port->set_voice_value(ctx, voice_num, time + 1, 0.0f);
 	}
 
 	assert(key->state == Key::State::ON_ASSIGNED);
@@ -301,9 +321,9 @@ NoteNode::note_on(RunContext& context, uint8_t note_num, uint8_t velocity, Frame
 }
 
 void
-NoteNode::note_off(RunContext& context, uint8_t note_num, FrameTime time)
+NoteNode::note_off(RunContext& ctx, uint8_t note_num, FrameTime time)
 {
-	assert(time >= context.start() && time <= context.end());
+	assert(time >= ctx.start() && time <= ctx.end());
 
 	Key* key = &_keys[note_num];
 
@@ -312,7 +332,7 @@ NoteNode::note_off(RunContext& context, uint8_t note_num, FrameTime time)
 		if ((*_voices)[key->voice].state == Voice::State::ACTIVE) {
 			assert((*_voices)[key->voice].note == note_num);
 			if ( ! _sustain) {
-				free_voice(context, key->voice, time);
+				free_voice(ctx, key->voice, time);
 			} else {
 				(*_voices)[key->voice].state = Voice::State::HOLDING;
 			}
@@ -323,9 +343,9 @@ NoteNode::note_off(RunContext& context, uint8_t note_num, FrameTime time)
 }
 
 void
-NoteNode::free_voice(RunContext& context, uint32_t voice, FrameTime time)
+NoteNode::free_voice(RunContext& ctx, uint32_t voice, FrameTime time)
 {
-	assert(time >= context.start() && time <= context.end());
+	assert(time >= ctx.start() && time <= ctx.end());
 
 	// Find a key to reassign to the freed voice (the newest, if there is one)
 	Key*    replace_key     = nullptr;
@@ -345,8 +365,8 @@ NoteNode::free_voice(RunContext& context, uint32_t voice, FrameTime time)
 		assert(replace_key->state == Key::State::ON_UNASSIGNED);
 
 		// Change the freq but leave the gate high and don't retrigger
-		_freq_port->set_voice_value(context, voice, time, note_to_freq(replace_key_num));
-		_num_port->set_voice_value(context, voice, time, replace_key_num);
+		_freq_port->set_voice_value(ctx, voice, time, note_to_freq(replace_key_num));
+		_num_port->set_voice_value(ctx, voice, time, replace_key_num);
 
 		replace_key->state = Key::State::ON_ASSIGNED;
 		replace_key->voice = voice;
@@ -355,65 +375,65 @@ NoteNode::free_voice(RunContext& context, uint32_t voice, FrameTime time)
 		(*_voices)[voice].state = Voice::State::ACTIVE;
 	} else {
 		// No new note for voice, deactivate (set gate low)
-		_gate_port->set_voice_value(context, voice, time, 0.0f);
+		_gate_port->set_voice_value(ctx, voice, time, 0.0f);
 		(*_voices)[voice].state = Voice::State::FREE;
 	}
 }
 
 void
-NoteNode::all_notes_off(RunContext& context, FrameTime time)
+NoteNode::all_notes_off(RunContext& ctx, FrameTime time)
 {
-	assert(time >= context.start() && time <= context.end());
+	assert(time >= ctx.start() && time <= ctx.end());
 
 	// FIXME: set all keys to Key::OFF?
 
 	for (uint32_t i = 0; i < _polyphony; ++i) {
-		_gate_port->set_voice_value(context, i, time, 0.0f);
+		_gate_port->set_voice_value(ctx, i, time, 0.0f);
 		(*_voices)[i].state = Voice::State::FREE;
 	}
 }
 
 void
-NoteNode::sustain_on(RunContext& context, FrameTime time)
+NoteNode::sustain_on(RunContext&, FrameTime)
 {
 	_sustain = true;
 }
 
 void
-NoteNode::sustain_off(RunContext& context, FrameTime time)
+NoteNode::sustain_off(RunContext& ctx, FrameTime time)
 {
-	assert(time >= context.start() && time <= context.end());
+	assert(time >= ctx.start() && time <= ctx.end());
 
 	_sustain = false;
 
 	for (uint32_t i=0; i < _polyphony; ++i) {
 		if ((*_voices)[i].state == Voice::State::HOLDING) {
-			free_voice(context, i, time);
+			free_voice(ctx, i, time);
 		}
 	}
 }
 
 void
-NoteNode::bend(RunContext& context, FrameTime time, float amount)
+NoteNode::bend(RunContext& ctx, FrameTime time, float amount)
 {
-	_bend_port->set_control_value(context, time, amount);
+	_bend_port->set_control_value(ctx, time, amount);
 }
 
 void
-NoteNode::note_pressure(RunContext& context, FrameTime time, uint8_t note_num, float amount)
+NoteNode::note_pressure(RunContext& ctx, FrameTime time, uint8_t note_num, float amount)
 {
 	for (uint32_t i=0; i < _polyphony; ++i) {
 		if ((*_voices)[i].state != Voice::State::FREE && (*_voices)[i].note == note_num) {
-			_pressure_port->set_voice_value(context, i, time, amount);
+			_pressure_port->set_voice_value(ctx, i, time, amount);
 			return;
 		}
 	}
 }
 
 void
-NoteNode::channel_pressure(RunContext& context, FrameTime time, float amount)
+NoteNode::channel_pressure(RunContext& ctx, FrameTime time, float amount)
 {
-	_pressure_port->set_control_value(context, time, amount);
+	_pressure_port->set_control_value(ctx, time, amount);
 }
 
 } // namespace internals

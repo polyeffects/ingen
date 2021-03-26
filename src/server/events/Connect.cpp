@@ -17,8 +17,10 @@
 #include "Connect.hpp"
 
 #include "ArcImpl.hpp"
+#include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
 #include "BufferFactory.hpp"
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "InputPort.hpp"
@@ -27,26 +29,35 @@
 #include "internals/BlockDelay.hpp"
 #include "types.hpp"
 
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/paths.hpp"
 #include "raul/Maid.hpp"
 
 #include <cassert>
+#include <memory>
 #include <mutex>
+#include <set>
 #include <utility>
 
 namespace ingen {
 namespace server {
 namespace events {
 
-Connect::Connect(Engine&                engine,
-                 const SPtr<Interface>& client,
-                 SampleCount            timestamp,
-                 const ingen::Connect&  msg)
-	: Event(engine, client, msg.seq, timestamp)
-	, _msg(msg)
-	, _graph(nullptr)
-	, _head(nullptr)
-{}
+Connect::Connect(Engine&                           engine,
+                 const std::shared_ptr<Interface>& client,
+                 SampleCount                       timestamp,
+                 const ingen::Connect&             msg)
+    : Event(engine, client, msg.seq, timestamp)
+    , _msg(msg)
+    , _graph(nullptr)
+    , _head(nullptr)
+{
+}
+
+Connect::~Connect() = default;
 
 bool
 Connect::pre_process(PreProcessContext& ctx)
@@ -150,12 +161,12 @@ Connect::pre_process(PreProcessContext& ctx)
 }
 
 void
-Connect::execute(RunContext& context)
+Connect::execute(RunContext& ctx)
 {
 	if (_status == Status::SUCCESS) {
-		_head->add_arc(context, *_arc.get());
+		_head->add_arc(ctx, *_arc);
 		if (!_head->is_driver_port()) {
-			_head->set_voices(context, std::move(_voices));
+			_head->set_voices(ctx, std::move(_voices));
 		}
 		_head->connect_buffers();
 		if (_compiled_graph) {

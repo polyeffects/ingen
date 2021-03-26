@@ -17,31 +17,51 @@
 #include "ConnectWindow.hpp"
 
 #include "App.hpp"
+#include "Window.hpp"
 #include "WindowFactory.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
 #include "ingen/EngineBase.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
-#include "ingen/Module.hpp"
 #include "ingen/QueuedInterface.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
 #include "ingen/client/ClientStore.hpp"
-#include "ingen/client/GraphModel.hpp"
+#include "ingen/client/GraphModel.hpp" // IWYU pragma: keep
 #include "ingen/client/SigClientInterface.hpp"
 #include "ingen/client/SocketClient.hpp"
-#include "ingen_config.h"
+#include "ingen/paths.hpp"
+#include "raul/Path.hpp"
 #include "raul/Process.hpp"
 
 #include <boost/variant/get.hpp>
 #include <glib.h>
+#include <glibmm/main.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/ustring.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/image.h>
+#include <gtkmm/label.h>
+#include <gtkmm/main.h>
+#include <gtkmm/progressbar.h>
+#include <gtkmm/radiobutton.h>
+#include <gtkmm/spinbutton.h>
 #include <gtkmm/stock.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
 
 #include <limits>
+#include <memory>
 #include <string>
+#include <sys/time.h>
 #include <utility>
-
-using namespace ingen::client;
 
 namespace ingen {
 namespace gui {
@@ -129,7 +149,7 @@ ConnectWindow::ingen_response(int32_t            id,
 }
 
 void
-ConnectWindow::set_connected_to(SPtr<ingen::Interface> engine)
+ConnectWindow::set_connected_to(const std::shared_ptr<ingen::Interface>& engine)
 {
 	_app->world().set_interface(engine);
 
@@ -195,10 +215,10 @@ ConnectWindow::connect_remote(const URI& uri)
 {
 	ingen::World& world = _app->world();
 
-	SPtr<SigClientInterface> sci(new SigClientInterface());
-	SPtr<QueuedInterface>    qi(new QueuedInterface(sci));
+	auto sci = std::make_shared<client::SigClientInterface>();
+	auto qi  = std::make_shared<QueuedInterface>(sci);
 
-	SPtr<ingen::Interface> iface(world.new_interface(uri, qi));
+	std::shared_ptr<ingen::Interface> iface(world.new_interface(uri, qi));
 	if (iface) {
 		world.set_interface(iface);
 		_app->attach(qi);
@@ -230,7 +250,7 @@ ConnectWindow::connect(bool existing)
 		if (existing) {
 			uri_str = world.interface()->uri();
 			_connect_stage = 1;
-			SPtr<client::SocketClient> client = dynamic_ptr_cast<client::SocketClient>(
+			auto client = std::dynamic_pointer_cast<client::SocketClient>(
 				world.interface());
 			if (client) {
 				_app->attach(client->respondee());
@@ -254,7 +274,7 @@ ConnectWindow::connect(bool existing)
 		const std::string port  = std::to_string(_port_spinbutton->get_value_as_int());
 		const char*       cmd[] = { "ingen", "-e", "-E", port.c_str(), nullptr };
 
-		if (!Raul::Process::launch(cmd)) {
+		if (!raul::Process::launch(cmd)) {
 			error("Failed to launch engine process");
 			return;
 		}
@@ -291,7 +311,7 @@ ConnectWindow::disconnect()
 	_attached = false;
 
 	_app->detach();
-	set_connected_to(SPtr<ingen::Interface>());
+	set_connected_to(nullptr);
 
 	if (!_widgets_loaded) {
 		return;
@@ -463,7 +483,7 @@ ConnectWindow::gtk_callback()
 	}
 
 	// Timing stuff for repeated attach attempts
-	timeval now;
+	timeval now = {};
 	gettimeofday(&now, nullptr);
 	static const timeval start    = now;
 	static timeval       last     = now;
@@ -485,7 +505,7 @@ ConnectWindow::gtk_callback()
 		if (ms_since_last >= 250) {
 			last = now;
 			if (_mode == Mode::INTERNAL) {
-				SPtr<SigClientInterface> client(new SigClientInterface());
+				auto client = std::make_shared<client::SigClientInterface>();
 				_app->world().interface()->set_respondee(client);
 				_app->attach(client);
 				_app->register_callbacks();
@@ -527,8 +547,8 @@ ConnectWindow::gtk_callback()
 		next_stage();
 	} else if (_connect_stage == 4) {
 		if (!_app->store()->empty()) {
-			SPtr<const GraphModel> root = dynamic_ptr_cast<const GraphModel>(
-				_app->store()->object(Raul::Path("/")));
+			auto root = std::dynamic_pointer_cast<const client::GraphModel>(
+				_app->store()->object(raul::Path("/")));
 			if (root) {
 				set_connected_to(_app->interface());
 				_app->window_factory()->present_graph(root);

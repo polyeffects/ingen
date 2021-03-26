@@ -21,8 +21,20 @@
 #include "UndoStack.hpp"
 #include "types.hpp"
 
+#include <memory>
+
 namespace ingen {
+
+class Interface;
+struct Redo;
+struct Undo;
+
 namespace server {
+
+class Engine;
+class PreProcessContext;
+class RunContext;
+
 namespace events {
 
 /** A request to undo the last change to the engine.
@@ -32,18 +44,18 @@ namespace events {
 class Undo : public Event
 {
 public:
-	Undo(Engine&                engine,
-	     const SPtr<Interface>& client,
-	     SampleCount            timestamp,
-	     const ingen::Undo&     msg);
+	Undo(Engine&                           engine,
+	     const std::shared_ptr<Interface>& client,
+	     SampleCount                       timestamp,
+	     const ingen::Undo&                msg);
 
-	Undo(Engine&                engine,
-	     const SPtr<Interface>& client,
-	     SampleCount            timestamp,
-	     const ingen::Redo&     msg);
+	Undo(Engine&                           engine,
+	     const std::shared_ptr<Interface>& client,
+	     SampleCount                       timestamp,
+	     const ingen::Redo&                msg);
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 
 private:

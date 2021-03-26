@@ -20,21 +20,33 @@
 #include "ClientUpdate.hpp"
 #include "ControlBindings.hpp"
 #include "Event.hpp"
+#include "State.hpp"
+#include "types.hpp"
 
-#include "lilv/lilv.h"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/URI.hpp"
+#include "raul/Maid.hpp"
 
 #include <boost/optional/optional.hpp>
 
-#include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace ingen {
+
+class Interface;
+struct Delta;
+struct Put;
+struct SetProperty;
+
 namespace server {
 
 class CompiledGraph;
 class Engine;
 class GraphImpl;
+class PreProcessContext;
 class RunContext;
 
 namespace events {
@@ -47,22 +59,22 @@ class SetPortValue;
 class Delta : public Event
 {
 public:
-	Delta(Engine&                engine,
-	      const SPtr<Interface>& client,
-	      SampleCount            timestamp,
-	      const ingen::Put&      msg);
+	Delta(Engine&                           engine,
+	      const std::shared_ptr<Interface>& client,
+	      SampleCount                       timestamp,
+	      const ingen::Put&                 msg);
 
-	Delta(Engine&                engine,
-	      const SPtr<Interface>& client,
-	      SampleCount            timestamp,
-	      const ingen::Delta&    msg);
+	Delta(Engine&                           engine,
+	      const std::shared_ptr<Interface>& client,
+	      SampleCount                       timestamp,
+	      const ingen::Delta&               msg);
 
-	Delta(Engine&                   engine,
-	      const SPtr<Interface>&    client,
-	      SampleCount               timestamp,
-	      const ingen::SetProperty& msg);
+	Delta(Engine&                           engine,
+	      const std::shared_ptr<Interface>& client,
+	      SampleCount                       timestamp,
+	      const ingen::SetProperty&         msg);
 
-	~Delta() = default;
+	~Delta() override = default;
 
 	void add_set_event(const char* port_symbol,
 	                   const void* value,
@@ -70,18 +82,14 @@ public:
 	                   uint32_t    type);
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
 	Execution get_execution() const override;
 
 private:
-	enum class Type {
-		SET,
-		PUT,
-		PATCH
-	};
+	enum class Type { SET, PUT, PATCH };
 
 	enum class SpecialType {
 		NONE,
@@ -95,25 +103,25 @@ private:
 		LOADED_BUNDLE
 	};
 
-	using SetEvents = std::vector<UPtr<SetPortValue>>;
+	using SetEvents = std::vector<std::unique_ptr<SetPortValue>>;
 
 	void init();
 
-	UPtr<Event>               _create_event;
-	SetEvents                 _set_events;
-	std::vector<SpecialType>  _types;
-	std::vector<SpecialType>  _remove_types;
-	URI                       _subject;
-	Properties                _properties;
-	Properties                _remove;
-	ClientUpdate              _update;
-	ingen::Resource*          _object;
-	GraphImpl*                _graph;
-	MPtr<CompiledGraph>       _compiled_graph;
-	ControlBindings::Binding* _binding;
-	LilvState*                _state;
-	Resource::Graph           _context;
-	Type                      _type;
+	std::unique_ptr<Event>           _create_event;
+	SetEvents                        _set_events;
+	std::vector<SpecialType>         _types;
+	std::vector<SpecialType>         _remove_types;
+	URI                              _subject;
+	Properties                       _properties;
+	Properties                       _remove;
+	ClientUpdate                     _update;
+	ingen::Resource*                 _object;
+	GraphImpl*                       _graph;
+	raul::managed_ptr<CompiledGraph> _compiled_graph;
+	ControlBindings::Binding*        _binding;
+	StatePtr                         _state;
+	Resource::Graph                  _context;
+	Type                             _type;
 
 	Properties _added;
 	Properties _removed;

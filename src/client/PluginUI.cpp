@@ -16,15 +16,23 @@
 
 #include "ingen/client/PluginUI.hpp"
 
-#include "ingen/Interface.hpp"
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
 #include "ingen/client/BlockModel.hpp"
 #include "ingen/client/PortModel.hpp"
 #include "lv2/atom/atom.h"
+#include "lv2/core/lv2.h"
 #include "lv2/ui/ui.h"
+#include "raul/Symbol.hpp"
+
+#include <sigc++/signal.h>
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -33,14 +41,14 @@ namespace client {
 
 SuilHost* PluginUI::ui_host = nullptr;
 
-static SPtr<const PortModel>
+static std::shared_ptr<const PortModel>
 get_port(PluginUI* ui, uint32_t port_index)
 {
 	if (port_index >= ui->block()->ports().size()) {
 		ui->world().log().error("%1% UI tried to access invalid port %2%\n",
 		                        ui->block()->plugin()->uri().c_str(),
 		                        port_index);
-		return SPtr<const PortModel>();
+		return nullptr;
 	}
 	return ui->block()->ports()[port_index];
 }
@@ -52,9 +60,9 @@ lv2_ui_write(SuilController controller,
              uint32_t       format,
              const void*    buffer)
 {
-	PluginUI* const       ui   = (PluginUI*)controller;
-	const URIs&           uris = ui->world().uris();
-	SPtr<const PortModel> port = get_port(ui, port_index);
+	auto* const ui   = static_cast<PluginUI*>(controller);
+	const URIs& uris = ui->world().uris();
+	auto        port = get_port(ui, port_index);
 	if (!port) {
 		return;
 	}
@@ -67,7 +75,7 @@ lv2_ui_write(SuilController controller,
 				ui->block()->plugin()->uri().c_str());
 			return;
 		}
-		const float value = *(const float*)buffer;
+		const float value = *static_cast<const float*>(buffer);
 		if (port->value().type() == uris.atom_Float &&
 		    value == port->value().get<float>()) {
 			return;  // Ignore feedback
@@ -79,10 +87,11 @@ lv2_ui_write(SuilController controller,
 			ui->world().forge().make(value),
 			Resource::Graph::DEFAULT);
 
-	} else if (format == uris.atom_eventTransfer.urid.get<LV2_URID>()) {
-		const LV2_Atom* atom = (const LV2_Atom*)buffer;
-		Atom            val  = ui->world().forge().alloc(
-			atom->size, atom->type, LV2_ATOM_BODY_CONST(atom));
+	} else if (format == uris.atom_eventTransfer.urid()) {
+		const auto* atom = static_cast<const LV2_Atom*>(buffer);
+		Atom        val  = Forge::alloc(atom->size,
+		                                atom->type,
+		                                LV2_ATOM_BODY_CONST(atom));
 		ui->signal_property_changed()(port->uri(),
 		                              uris.ingen_activity,
 		                              val,
@@ -97,7 +106,7 @@ lv2_ui_write(SuilController controller,
 static uint32_t
 lv2_ui_port_index(SuilController controller, const char* port_symbol)
 {
-	PluginUI* const ui = (PluginUI*)controller;
+	auto* const ui = static_cast<PluginUI*>(controller);
 
 	const BlockModel::Ports& ports = ui->block()->ports();
 	for (uint32_t i = 0; i < ports.size(); ++i) {
@@ -114,8 +123,8 @@ lv2_ui_subscribe(SuilController            controller,
                  uint32_t                  protocol,
                  const LV2_Feature* const* features)
 {
-	PluginUI* const       ui   = (PluginUI*)controller;
-	SPtr<const PortModel> port = get_port(ui, port_index);
+	auto* const           ui   = static_cast<PluginUI*>(controller);
+	std::shared_ptr<const PortModel> port = get_port(ui, port_index);
 	if (!port) {
 		return 1;
 	}
@@ -135,8 +144,8 @@ lv2_ui_unsubscribe(SuilController            controller,
                    uint32_t                  protocol,
                    const LV2_Feature* const* features)
 {
-	PluginUI* const       ui   = (PluginUI*)controller;
-	SPtr<const PortModel> port = get_port(ui, port_index);
+	auto* const ui   = static_cast<PluginUI*>(controller);
+	auto        port = get_port(ui, port_index);
 	if (!port) {
 		return 1;
 	}
@@ -150,18 +159,18 @@ lv2_ui_unsubscribe(SuilController            controller,
 	return 0;
 }
 
-PluginUI::PluginUI(ingen::World&          world,
-                   SPtr<const BlockModel> block,
-                   LilvUIs*               uis,
-                   const LilvUI*          ui,
-                   const LilvNode*        ui_type)
-	: _world(world)
-	, _block(std::move(block))
-	, _instance(nullptr)
-	, _uis(uis)
-	, _ui(ui)
-	, _ui_node(lilv_node_duplicate(lilv_ui_get_uri(ui)))
-	, _ui_type(lilv_node_duplicate(ui_type))
+PluginUI::PluginUI(ingen::World&                     world,
+                   std::shared_ptr<const BlockModel> block,
+                   LilvUIs*                          uis,
+                   const LilvUI*                     ui,
+                   const LilvNode*                   ui_type)
+    : _world(world)
+    , _block(std::move(block))
+    , _instance(nullptr)
+    , _uis(uis)
+    , _ui(ui)
+    , _ui_node(lilv_node_duplicate(lilv_ui_get_uri(ui)))
+    , _ui_type(lilv_node_duplicate(ui_type))
 {
 }
 
@@ -177,10 +186,10 @@ PluginUI::~PluginUI()
 	lilv_world_unload_resource(_world.lilv_world(), lilv_ui_get_uri(_ui));
 }
 
-SPtr<PluginUI>
-PluginUI::create(ingen::World&          world,
-                 SPtr<const BlockModel> block,
-                 const LilvPlugin*      plugin)
+std::shared_ptr<PluginUI>
+PluginUI::create(ingen::World&                            world,
+                 const std::shared_ptr<const BlockModel>& block,
+                 const LilvPlugin*                        plugin)
 {
 	if (!PluginUI::ui_host) {
 		PluginUI::ui_host = suil_host_new(lv2_ui_write,
@@ -210,11 +219,11 @@ PluginUI::create(ingen::World&          world,
 
 	if (!ui) {
 		lilv_node_free(gtk_ui);
-		return SPtr<PluginUI>();
+		return nullptr;
 	}
 
 	// Create the PluginUI, but don't instantiate yet
-	SPtr<PluginUI> ret(new PluginUI(world, block, uis, ui, ui_type));
+	std::shared_ptr<PluginUI> ret(new PluginUI(world, block, uis, ui, ui_type));
 	ret->_features = world.lv2_features().lv2_features(
 		world, const_cast<BlockModel*>(block.get()));
 
@@ -299,7 +308,7 @@ PluginUI::instantiate()
 SuilWidget
 PluginUI::get_widget()
 {
-	return (SuilWidget*)suil_instance_get_widget(_instance);
+	return suil_instance_get_widget(_instance);
 }
 
 void

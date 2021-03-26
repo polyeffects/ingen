@@ -17,8 +17,21 @@
 #include "MessagesWindow.hpp"
 
 #include "App.hpp"
+#include "Window.hpp"
 
 #include "ingen/URIs.hpp"
+#include "lv2/urid/urid.h"
+
+#include <gdkmm/color.h>
+#include <glibmm/propertyproxy.h>
+#include <glibmm/signalproxy.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/enums.h>
+#include <gtkmm/textbuffer.h>
+#include <gtkmm/texttagtable.h>
+#include <gtkmm/textview.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -41,8 +54,8 @@ MessagesWindow::MessagesWindow(BaseObjectType*                   cobject,
 	_close_button->signal_clicked().connect(sigc::mem_fun(this, &Window::hide));
 
 	for (int s = Gtk::STATE_NORMAL; s <= Gtk::STATE_INSENSITIVE; ++s) {
-		_textview->modify_base((Gtk::StateType)s, Gdk::Color("#000000"));
-		_textview->modify_text((Gtk::StateType)s, Gdk::Color("#EEEEEC"));
+		_textview->modify_base(static_cast<Gtk::StateType>(s), Gdk::Color("#000000"));
+		_textview->modify_text(static_cast<Gtk::StateType>(s), Gdk::Color("#EEEEEC"));
 	}
 }
 
@@ -107,8 +120,9 @@ void
 MessagesWindow::flush()
 {
 	while (true) {
-		LV2_URID    type;
+		LV2_URID    type = 0;
 		std::string line;
+
 		{
 			std::lock_guard<std::mutex> lock(_mutex);
 			if (!_stream.rdbuf()->in_avail()) {

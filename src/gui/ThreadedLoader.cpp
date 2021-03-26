@@ -19,19 +19,35 @@
 #include "App.hpp"
 
 #include "ingen/Log.hpp"
-#include "ingen/Module.hpp"
+#include "ingen/Parser.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Serialiser.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/World.hpp"
 #include "ingen/client/GraphModel.hpp"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
+
+#include <boost/optional/optional.hpp>
+#include <glibmm/ustring.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/adaptors/retype_return.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <cassert>
+#include <memory>
 #include <string>
+#include <utility>
 
 using boost::optional;
 
 namespace ingen {
+
+class Interface;
+
 namespace gui {
 
-ThreadedLoader::ThreadedLoader(App& app, SPtr<Interface> engine)
+ThreadedLoader::ThreadedLoader(App& app, std::shared_ptr<Interface> engine)
     : _app(app)
     , _sem(0)
     , _engine(std::move(engine))
@@ -52,7 +68,7 @@ ThreadedLoader::~ThreadedLoader()
 	}
 }
 
-SPtr<Parser>
+std::shared_ptr<Parser>
 ThreadedLoader::parser()
 {
 	return _app.world().parser();
@@ -71,11 +87,11 @@ ThreadedLoader::run()
 }
 
 void
-ThreadedLoader::load_graph(bool                   merge,
-                           const FilePath&        file_path,
-                           optional<Raul::Path>   engine_parent,
-                           optional<Raul::Symbol> engine_symbol,
-                           optional<Properties>   engine_data)
+ThreadedLoader::load_graph(bool                          merge,
+                           const FilePath&               file_path,
+                           const optional<raul::Path>&   engine_parent,
+                           const optional<raul::Symbol>& engine_symbol,
+                           const optional<Properties>&   engine_data)
 {
 	std::lock_guard<std::mutex> lock(_mutex);
 
@@ -88,7 +104,7 @@ ThreadedLoader::load_graph(bool                   merge,
 		}
 	}
 
-	_events.push_back(sigc::hide_return(
+	_events.emplace_back(sigc::hide_return(
 	        sigc::bind(sigc::mem_fun(this, &ThreadedLoader::load_graph_event),
 	                   file_path,
 	                   engine_parent,
@@ -99,10 +115,10 @@ ThreadedLoader::load_graph(bool                   merge,
 }
 
 void
-ThreadedLoader::load_graph_event(const FilePath&        file_path,
-                                 optional<Raul::Path>   engine_parent,
-                                 optional<Raul::Symbol> engine_symbol,
-                                 optional<Properties>   engine_data)
+ThreadedLoader::load_graph_event(const FilePath&               file_path,
+                                 const optional<raul::Path>&   engine_parent,
+                                 const optional<raul::Symbol>& engine_symbol,
+                                 const optional<Properties>&   engine_data)
 {
 	std::lock_guard<std::mutex> lock(_app.world().rdf_mutex());
 
@@ -115,11 +131,13 @@ ThreadedLoader::load_graph_event(const FilePath&        file_path,
 }
 
 void
-ThreadedLoader::save_graph(SPtr<const client::GraphModel> model, const URI& uri)
+ThreadedLoader::save_graph(
+    const std::shared_ptr<const client::GraphModel>& model,
+    const URI&                                       uri)
 {
 	std::lock_guard<std::mutex> lock(_mutex);
 
-	_events.push_back(sigc::hide_return(
+	_events.emplace_back(sigc::hide_return(
 	        sigc::bind(sigc::mem_fun(this, &ThreadedLoader::save_graph_event),
 	                   model,
 	                   uri)));
@@ -128,8 +146,9 @@ ThreadedLoader::save_graph(SPtr<const client::GraphModel> model, const URI& uri)
 }
 
 void
-ThreadedLoader::save_graph_event(SPtr<const client::GraphModel> model,
-                                 const URI&                     uri)
+ThreadedLoader::save_graph_event(
+    const std::shared_ptr<const client::GraphModel>& model,
+    const URI&                                       uri)
 {
 	assert(uri.scheme() == "file");
 	if (_app.serialiser()) {

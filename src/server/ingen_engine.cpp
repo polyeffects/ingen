@@ -14,19 +14,22 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+// IWYU pragma: no_include "ingen/Atom.hpp"
+
 #include "Engine.hpp"
-#include "EventWriter.hpp"
 #include "util.hpp"
 
 #include "ingen/Module.hpp"
 #include "ingen/World.hpp"
 
-using namespace ingen;
+#include <memory>
 
-struct IngenEngineModule : public ingen::Module {
-	void load(ingen::World& world) override {
+namespace ingen {
+
+struct EngineModule : public Module {
+	void load(World& world) override {
 		server::set_denormal_flags(world.log());
-		SPtr<server::Engine> engine(new server::Engine(world));
+		auto engine = std::make_shared<server::Engine>(world);
 		world.set_engine(engine);
 		if (!world.interface()) {
 			world.set_interface(engine->interface());
@@ -34,12 +37,14 @@ struct IngenEngineModule : public ingen::Module {
 	}
 };
 
+} // namespace ingen
+
 extern "C" {
 
 ingen::Module*
 ingen_module_load()
 {
-	return new IngenEngineModule();
+	return new ingen::EngineModule();
 }
 
 } // extern "C"

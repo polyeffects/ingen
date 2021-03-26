@@ -18,16 +18,20 @@
 #define INGEN_GUI_PORT_HPP
 
 #include "ganv/Port.hpp"
-#include "ingen/types.hpp"
 
-#include <gtkmm/menu.h>
+#include <gdk/gdk.h>
+#include <glib.h>
 
-#include <cassert>
+#include <memory>
 #include <string>
 
-namespace Raul {
-class Atom;
-}
+namespace Ganv {
+class Module;
+} // namespace Ganv
+
+namespace Gtk {
+class Menu;
+} // namespace Gtk
 
 namespace ingen {
 
@@ -48,15 +52,17 @@ class GraphBox;
 class Port : public Ganv::Port
 {
 public:
-	static Port* create(
-		App&                          app,
-		Ganv::Module&                 module,
-		SPtr<const client::PortModel> pm,
-		bool                          flip = false);
+	static Port* create(App&                                            app,
+	                    Ganv::Module&                                   module,
+	                    const std::shared_ptr<const client::PortModel>& pm,
+	                    bool flip = false);
 
-	~Port();
+	~Port() override;
 
-	SPtr<const client::PortModel> model() const { return _port_model.lock(); }
+	std::shared_ptr<const client::PortModel> model() const
+	{
+		return _port_model.lock();
+	}
 
 	bool show_menu(GdkEventButton* ev);
 	void update_metadata();
@@ -68,13 +74,14 @@ public:
 	bool on_selected(gboolean b) override;
 
 private:
-	Port(App&                          app,
-	     Ganv::Module&                 module,
-	     SPtr<const client::PortModel> pm,
-	     const std::string&            name,
-	     bool                          flip = false);
+	Port(App&                                            app,
+	     Ganv::Module&                                   module,
+	     const std::shared_ptr<const client::PortModel>& pm,
+	     const std::string&                              name,
+	     bool                                            flip = false);
 
-	static std::string port_label(App& app, SPtr<const client::PortModel> pm);
+	static std::string
+	port_label(App& app, const std::shared_ptr<const client::PortModel>& pm);
 
 	Gtk::Menu* build_enum_menu();
 	Gtk::Menu* build_uri_menu();
@@ -91,10 +98,10 @@ private:
 	void port_properties_changed();
 	void set_type_tag();
 
-	App&                          _app;
-	WPtr<const client::PortModel> _port_model;
-	bool                          _entered : 1;
-	bool                          _flipped : 1;
+	App&                                   _app;
+	std::weak_ptr<const client::PortModel> _port_model;
+	bool                                   _entered : 1;
+	bool                                   _flipped : 1;
 };
 
 } // namespace gui

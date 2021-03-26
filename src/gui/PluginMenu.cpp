@@ -15,9 +15,21 @@
 */
 
 #include "PluginMenu.hpp"
+
 #include "ingen/Log.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
 #include "ingen/client/PluginModel.hpp"
 
+#include <glibmm/ustring.h>
+#include <gtkmm/menu_elems.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/menushell.h>
+#include <gtkmm/object.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+
+#include <memory>
 #include <utility>
 
 namespace ingen {
@@ -64,7 +76,7 @@ PluginMenu::clear()
 }
 
 void
-PluginMenu::add_plugin(SPtr<client::PluginModel> p)
+PluginMenu::add_plugin(const std::shared_ptr<client::PluginModel>& p)
 {
 	using iterator = ClassMenus::iterator;
 
@@ -143,7 +155,8 @@ PluginMenu::build_plugin_class_menu(Gtk::Menu*               menu,
 }
 
 void
-PluginMenu::add_plugin_to_menu(MenuRecord& menu, SPtr<client::PluginModel> p)
+PluginMenu::add_plugin_to_menu(MenuRecord&                                 menu,
+                               const std::shared_ptr<client::PluginModel>& p)
 {
 	const URIs& uris        = _world.uris();
 	LilvWorld*  lworld      = _world.lilv_world();
@@ -169,7 +182,7 @@ PluginMenu::add_plugin_to_menu(MenuRecord& menu, SPtr<client::PluginModel> p)
 }
 
 void
-PluginMenu::load_plugin(WPtr<client::PluginModel> weak_plugin)
+PluginMenu::load_plugin(const std::weak_ptr<client::PluginModel>& weak_plugin)
 {
 	signal_load_plugin.emit(weak_plugin);
 }

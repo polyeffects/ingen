@@ -20,20 +20,25 @@
 #include "GraphView.hpp"
 
 #include "ingen/Message.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/client/GraphModel.hpp"
-#include "ingen/types.hpp"
 #include "raul/Path.hpp"
 
 #include <gtkmm/box.h>
 #include <gtkmm/label.h>
+#include <gtkmm/object.h>
 #include <gtkmm/togglebutton.h>
+#include <sigc++/signal.h>
 
 #include <cassert>
 #include <list>
+#include <memory>
 #include <string>
 
 namespace ingen {
 namespace gui {
+
+class App;
 
 /** Collection of breadcrumb buttons forming a path.
  * This doubles as a cache for GraphViews.
@@ -45,11 +50,12 @@ class BreadCrumbs : public Gtk::HBox
 public:
 	explicit BreadCrumbs(App& app);
 
-	SPtr<GraphView> view(const Raul::Path& path);
+	std::shared_ptr<GraphView> view(const raul::Path& path);
 
-	void build(Raul::Path path, SPtr<GraphView> view);
+	void build(const raul::Path& path, const std::shared_ptr<GraphView>& view);
 
-	sigc::signal<void, const Raul::Path&, SPtr<GraphView> > signal_graph_selected;
+	sigc::signal<void, const raul::Path&, std::shared_ptr<GraphView>>
+	    signal_graph_selected;
 
 private:
 	/** Breadcrumb button.
@@ -64,9 +70,9 @@ private:
 	class BreadCrumb : public Gtk::ToggleButton
 	{
 	public:
-		BreadCrumb(const Raul::Path& path, SPtr<GraphView> view = SPtr<GraphView>())
-			: _path(path)
-			, _view(view)
+		BreadCrumb(const raul::Path&                 path,
+		           const std::shared_ptr<GraphView>& view = nullptr)
+		    : _path(path), _view(view)
 		{
 			assert(!view || view->graph()->path() == path);
 			set_border_width(0);
@@ -75,15 +81,15 @@ private:
 			show_all();
 		}
 
-		void set_view(SPtr<GraphView> view) {
+		void set_view(const std::shared_ptr<GraphView>& view) {
 			assert(!view || view->graph()->path() == _path);
 			_view = view;
 		}
 
-		const Raul::Path& path() const { return _path; }
-		SPtr<GraphView>   view() const { return _view; }
+		const raul::Path&          path() const { return _path; }
+		std::shared_ptr<GraphView> view() const { return _view; }
 
-		void set_path(const Raul::Path& path) {
+		void set_path(const raul::Path& path) {
 			remove();
 			const char* text = (path.is_root()) ? "/" : path.symbol();
 			Gtk::Label* lab = manage(new Gtk::Label(text));
@@ -91,26 +97,27 @@ private:
 			lab->show();
 			add(*lab);
 
-			if (_view && _view->graph()->path() != path)
+			if (_view && _view->graph()->path() != path) {
 				_view.reset();
+			}
 		}
 
 	private:
-		Raul::Path      _path;
-		SPtr<GraphView> _view;
+		raul::Path                 _path;
+		std::shared_ptr<GraphView> _view;
 	};
 
-	BreadCrumb* create_crumb(const Raul::Path& path,
-	                         SPtr<GraphView>   view = SPtr<GraphView>());
+	BreadCrumb* create_crumb(const raul::Path&                 path,
+	                         const std::shared_ptr<GraphView>& view = nullptr);
 
 	void breadcrumb_clicked(BreadCrumb* crumb);
 
 	void message(const Message& msg);
 	void object_destroyed(const URI& uri);
-	void object_moved(const Raul::Path& old_path, const Raul::Path& new_path);
+	void object_moved(const raul::Path& old_path, const raul::Path& new_path);
 
-	Raul::Path             _active_path;
-	Raul::Path             _full_path;
+	raul::Path             _active_path;
+	raul::Path             _full_path;
 	bool                   _enable_signal;
 	std::list<BreadCrumb*> _breadcrumbs;
 };

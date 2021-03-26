@@ -17,24 +17,30 @@
 #ifndef INGEN_GUI_GRAPHPORTMODULE_HPP
 #define INGEN_GUI_GRAPHPORTMODULE_HPP
 
-#include "Port.hpp"
-
 #include "ganv/Module.hpp"
+#include "ingen/URI.hpp"
 
+#include <gdk/gdk.h>
+#include <glib.h>
+
+#include <memory>
 #include <string>
 
-namespace Raul { class Atom; }
+namespace ingen {
 
-namespace ingen { namespace client {
+class Atom;
+
+namespace client {
 class PortModel;
-} }
+} // namespace client
+} // namespace ingen
 
 namespace ingen {
 namespace gui {
 
+class App;
 class GraphCanvas;
 class Port;
-class PortMenu;
 
 /** A "module" to represent a graph's port on its own canvas.
  *
@@ -46,7 +52,8 @@ class GraphPortModule : public Ganv::Module
 {
 public:
 	static GraphPortModule*
-	create(GraphCanvas& canvas, const SPtr<const client::PortModel>& model);
+	create(GraphCanvas&                                    canvas,
+	       const std::shared_ptr<const client::PortModel>& model);
 
 	App& app() const;
 
@@ -55,11 +62,11 @@ public:
 
 	void set_name(const std::string& n);
 
-	SPtr<const client::PortModel> port() const { return _model; }
+	std::shared_ptr<const client::PortModel> port() const { return _model; }
 
 protected:
-	GraphPortModule(GraphCanvas&                         canvas,
-	                const SPtr<const client::PortModel>& model);
+	GraphPortModule(GraphCanvas&                                    canvas,
+	                const std::shared_ptr<const client::PortModel>& model);
 
 	bool show_menu(GdkEventButton* ev);
 	void set_selected(gboolean b) override;
@@ -68,8 +75,8 @@ protected:
 
 	void property_changed(const URI& key, const Atom& value);
 
-	SPtr<const client::PortModel> _model;
-	Port*                         _port;
+	std::shared_ptr<const client::PortModel> _model;
+	Port*                                    _port;
 };
 
 } // namespace gui

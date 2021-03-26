@@ -20,14 +20,27 @@
 #include "InternalBlock.hpp"
 #include "types.hpp"
 
+#include "raul/Array.hpp"
+#include "raul/Maid.hpp"
+
 #include <cstdint>
 
+namespace raul {
+class Symbol;
+} // namespace raul
+
 namespace ingen {
+
+class URIs;
+
 namespace server {
 
+class BufferFactory;
+class GraphImpl;
 class InputPort;
-class OutputPort;
 class InternalPlugin;
+class OutputPort;
+class RunContext;
 
 namespace internals {
 
@@ -42,26 +55,26 @@ class NoteNode : public InternalBlock
 public:
 	NoteNode(InternalPlugin*     plugin,
 	         BufferFactory&      bufs,
-	         const Raul::Symbol& symbol,
+	         const raul::Symbol& symbol,
 	         bool                polyphonic,
 	         GraphImpl*          parent,
 	         SampleRate          srate);
 
 	bool prepare_poly(BufferFactory& bufs, uint32_t poly) override;
-	bool apply_poly(RunContext& context, uint32_t poly) override;
+	bool apply_poly(RunContext& ctx, uint32_t poly) override;
 
-	void run(RunContext& context) override;
+	void run(RunContext& ctx) override;
 
-	void note_on(RunContext& context, uint8_t note_num, uint8_t velocity, FrameTime time);
-	void note_off(RunContext& context, uint8_t note_num, FrameTime time);
-	void all_notes_off(RunContext& context, FrameTime time);
+	void note_on(RunContext& ctx, uint8_t note_num, uint8_t velocity, FrameTime time);
+	void note_off(RunContext& ctx, uint8_t note_num, FrameTime time);
+	void all_notes_off(RunContext& ctx, FrameTime time);
 
-	void sustain_on(RunContext& context, FrameTime time);
-	void sustain_off(RunContext& context, FrameTime time);
+	void sustain_on(RunContext& ctx, FrameTime time);
+	void sustain_off(RunContext& ctx, FrameTime time);
 
-	void bend(RunContext& context, FrameTime time, float amount);
-	void note_pressure(RunContext& context, FrameTime time, uint8_t note_num, float amount);
-	void channel_pressure(RunContext& context, FrameTime time, float amount);
+	void bend(RunContext& ctx, FrameTime time, float amount);
+	void note_pressure(RunContext& ctx, FrameTime time, uint8_t note_num, float amount);
+	void channel_pressure(RunContext& ctx, FrameTime time, float amount);
 
 	static InternalPlugin* internal_plugin(URIs& uris);
 
@@ -69,27 +82,27 @@ private:
 	/** Key, one for each key on the keyboard */
 	struct Key {
 		enum class State { OFF, ON_ASSIGNED, ON_UNASSIGNED };
-		Key() : state(State::OFF), voice(0), time(0) {}
-		State       state;
-		uint32_t    voice;
-		SampleCount time;
+
+		State       state = State::OFF;
+		uint32_t    voice = 0;
+		SampleCount time  = 0;
 	};
 
 	/** Voice, one of these always exists for each voice */
 	struct Voice {
 		enum class State { FREE, ACTIVE, HOLDING };
-		Voice() : state(State::FREE), note(0), time(0) {}
-		State       state;
-		uint8_t     note;
-		SampleCount time;
+
+		State       state = State::FREE;
+		uint8_t     note  = 0;
+		SampleCount time  = 0;
 	};
 
-	using Voices = Raul::Array<Voice>;
+	using Voices = raul::Array<Voice>;
 
-	void free_voice(RunContext& context, uint32_t voice, FrameTime time);
+	void free_voice(RunContext& ctx, uint32_t voice, FrameTime time);
 
-	MPtr<Voices> _voices;
-	MPtr<Voices> _prepared_voices;
+	raul::managed_ptr<Voices> _voices;
+	raul::managed_ptr<Voices> _prepared_voices;
 
 	Key  _keys[128];
 	bool _sustain;  ///< Whether or not hold pedal is depressed
@@ -104,8 +117,8 @@ private:
 	OutputPort* _pressure_port;
 };
 
+} // namespace internals
 } // namespace server
 } // namespace ingen
-} // namespace internals
 
 #endif // INGEN_INTERNALS_NOTE_HPP

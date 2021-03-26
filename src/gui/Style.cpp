@@ -17,24 +17,14 @@
 #include "Style.hpp"
 
 #include "App.hpp"
-#include "Port.hpp"
 
-#include "ganv/Port.hpp"
-#include "ingen/Log.hpp"
-#include "ingen/Parser.hpp"
-#include "ingen/client/PluginModel.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/PortModel.hpp"
 
-#include <cassert>
-#include <cstdlib>
-#include <fstream>
-#include <map>
 #include <string>
 
 namespace ingen {
 namespace gui {
-
-using namespace ingen::client;
 
 Style::Style(App& app)
 	// Colours from the Tango palette with modified V
@@ -59,7 +49,7 @@ Style::Style(App& app)
  * the default location.
  */
 void
-Style::load_settings(std::string filename)
+Style::load_settings(const std::string& filename)
 {
 	/* ... */
 }
@@ -68,7 +58,7 @@ Style::load_settings(std::string filename)
  * default location.
  */
 void
-Style::save_settings(std::string filename)
+Style::save_settings(const std::string& filename)
 {
 	/* ... */
 }

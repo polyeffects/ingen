@@ -19,22 +19,38 @@
 
 #include "Window.hpp"
 
-#include "ingen/client/BlockModel.hpp"
-#include "ingen/types.hpp"
+#include "ingen/Atom.hpp"
+#include "ingen/URI.hpp"
+#include "lv2/urid/urid.h"
 
-#include <gtkmm/alignment.h>
-#include <gtkmm/box.h>
-#include <gtkmm/builder.h>
-#include <gtkmm/button.h>
-#include <gtkmm/checkbutton.h>
-#include <gtkmm/combobox.h>
+#include <glibmm/refptr.h>
 #include <gtkmm/liststore.h>
-#include <gtkmm/scrolledwindow.h>
-#include <gtkmm/table.h>
+#include <gtkmm/treemodel.h>
+#include <gtkmm/treemodelcolumn.h>
+#include <gtkmm/window.h>
+#include <sigc++/connection.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+
+namespace Glib {
+class ustring;
+} // namespace Glib
+
+namespace Gtk {
+class Alignment;
+class Bin;
+class Builder;
+class Button;
+class CheckButton;
+class ComboBox;
+class ScrolledWindow;
+class Table;
+class VBox;
+class Widget;
+} // namespace Gtk
 
 namespace ingen {
 
@@ -54,8 +70,8 @@ public:
 	PropertiesWindow(BaseObjectType*                   cobject,
 	                 const Glib::RefPtr<Gtk::Builder>& xml);
 
-	void present(SPtr<const client::ObjectModel> model);
-	void set_object(SPtr<const client::ObjectModel> model);
+	void present(const std::shared_ptr<const client::ObjectModel>& model);
+	void set_object(const std::shared_ptr<const client::ObjectModel>& model);
 
 private:
 	/** Record of a property (row in the table) */
@@ -108,21 +124,21 @@ private:
 	using Records = std::map<URI, Record>;
 	Records _records;
 
-	SPtr<const client::ObjectModel> _model;
-	ComboColumns                    _combo_columns;
-	Glib::RefPtr<Gtk::ListStore>    _key_store;
-	sigc::connection                _property_connection;
-	sigc::connection                _property_removed_connection;
-	Gtk::VBox*                      _vbox;
-	Gtk::ScrolledWindow*            _scrolledwindow;
-	Gtk::Table*                     _table;
-	Gtk::ComboBox*                  _key_combo;
-	LV2_URID                        _value_type;
-	Gtk::Bin*                       _value_bin;
-	Gtk::Button*                    _add_button;
-	Gtk::Button*                    _cancel_button;
-	Gtk::Button*                    _apply_button;
-	Gtk::Button*                    _ok_button;
+	std::shared_ptr<const client::ObjectModel> _model;
+	ComboColumns                               _combo_columns;
+	Glib::RefPtr<Gtk::ListStore>               _key_store;
+	sigc::connection                           _property_connection;
+	sigc::connection                           _property_removed_connection;
+	Gtk::VBox*                                 _vbox;
+	Gtk::ScrolledWindow*                       _scrolledwindow;
+	Gtk::Table*                                _table;
+	Gtk::ComboBox*                             _key_combo;
+	LV2_URID                                   _value_type;
+	Gtk::Bin*                                  _value_bin;
+	Gtk::Button*                               _add_button;
+	Gtk::Button*                               _cancel_button;
+	Gtk::Button*                               _apply_button;
+	Gtk::Button*                               _ok_button;
 };
 
 } // namespace gui

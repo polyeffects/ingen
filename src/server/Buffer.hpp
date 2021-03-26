@@ -24,7 +24,6 @@
 
 #include "ingen/URIs.hpp"
 #include "ingen/ingen.h"
-#include "ingen/types.hpp"
 #include "lv2/atom/atom.h"
 #include "lv2/urid/urid.h"
 
@@ -56,8 +55,8 @@ public:
 
 	void clear();
 	void resize(uint32_t capacity);
-	void copy(const RunContext& context, const Buffer* src);
-	void prepare_write(RunContext& context);
+	void copy(const RunContext& ctx, const Buffer* src);
+	void prepare_write(RunContext& ctx);
 
 	void*       port_data(PortType port_type, SampleCount offset);
 	const void* port_data(PortType port_type, SampleCount offset) const;
@@ -69,15 +68,15 @@ public:
 		return is_audio() ? _capacity : sizeof(LV2_Atom) + get<LV2_Atom>()->size;
 	}
 
-	typedef BufferRef (BufferFactory::*GetFn)(LV2_URID, LV2_URID, uint32_t);
+	using GetFn = BufferRef (BufferFactory::*)(LV2_URID, LV2_URID, uint32_t);
 
 	/** Set the buffer type and optional value type for this buffer.
 	 *
-	 * @param get Called to get auxiliary buffers if necessary.
+	 * @param get_func Called to get auxiliary buffers if necessary.
 	 * @param type Type of buffer.
 	 * @param value_type Type of values in buffer if applicable (for sequences).
 	 */
-	void set_type(GetFn get, LV2_URID type, LV2_URID value_type);
+	void set_type(GetFn get_func, LV2_URID type, LV2_URID value_type);
 
 	inline bool is_audio() const {
 		return _type == _factory.uris().atom_Sound;
@@ -94,9 +93,10 @@ public:
 	/// Audio or float buffers only
 	inline const Sample* samples() const {
 		if (is_control()) {
-			return (const Sample*)LV2_ATOM_BODY_CONST(get<LV2_Atom_Float>());
+			return static_cast<const Sample*>(
+			    LV2_ATOM_BODY_CONST(get<LV2_Atom_Float>()));
 		} else if (is_audio()) {
-			return (const Sample*)_buf;
+			return static_cast<const Sample*>(_buf);
 		}
 		return nullptr;
 	}
@@ -104,9 +104,9 @@ public:
 	/// Audio buffers only
 	inline Sample* samples() {
 		if (is_control()) {
-			return (Sample*)LV2_ATOM_BODY(get<LV2_Atom_Float>());
+			return static_cast<Sample*>(LV2_ATOM_BODY(get<LV2_Atom_Float>()));
 		} else if (is_audio()) {
-			return (Sample*)_buf;
+			return static_cast<Sample*>(_buf);
 		}
 		return nullptr;
 	}
@@ -116,7 +116,7 @@ public:
 		if (is_audio() || is_control()) {
 			return samples()[offset];
 		} else if (_value_buffer) {
-			return ((LV2_Atom_Float*)value())->body;
+			return reinterpret_cast<const LV2_Atom_Float*>(value())->body;
 		}
 		return 0.0f;
 	}
@@ -168,10 +168,10 @@ public:
 	}
 
 	/// Audio buffers only
-	float peak(const RunContext& context) const;
+	float peak(const RunContext& ctx) const;
 
 	/// Sequence buffers only
-	void prepare_output_write(RunContext& context);
+	void prepare_output_write(RunContext& ctx);
 
 	/// Sequence buffers only
 	bool append_event(int64_t        frames,
@@ -201,11 +201,7 @@ public:
 	void update_value_buffer(SampleCount offset);
 
 	/// Set/add to audio buffer from the Sequence of Float in `src`
-	void render_sequence(const RunContext& context, const Buffer* src, bool add);
-
-#ifndef NDEBUG
-	void dump_cv(const RunContext& context) const;
-#endif
+	void render_sequence(const RunContext& ctx, const Buffer* src, bool add);
 
 	void set_capacity(uint32_t capacity) { _capacity = capacity; }
 
@@ -230,8 +226,11 @@ private:
 
 	void recycle();
 
-	BufferFactory&        _factory;
-	Buffer*               _next; ///< Intrusive linked list for BufferFactory
+	BufferFactory& _factory;
+
+	// NOLINTNEXTLINE(clang-analyzer-webkit.NoUncountedMemberChecker)
+	Buffer* _next; ///< Intrusive linked list for BufferFactory
+
 	void*                 _buf; ///< Actual buffer memory
 	BufferRef             _value_buffer; ///< Value buffer for numeric sequences
 	int64_t               _latest_event;

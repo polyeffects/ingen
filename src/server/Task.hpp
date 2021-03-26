@@ -17,6 +17,7 @@
 #ifndef INGEN_ENGINE_TASK_HPP
 #define INGEN_ENGINE_TASK_HPP
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <deque>
@@ -49,7 +50,10 @@ public:
 		assert(!(mode == Mode::SINGLE && !block));
 	}
 
-	Task(Task&& task)
+	Task(const Task&) = delete;
+	Task& operator=(const Task&) = delete;
+
+	Task(Task&& task) noexcept
 		: _children(std::move(task._children))
 		, _block(task._block)
 		, _mode(task._mode)
@@ -58,7 +62,7 @@ public:
 		, _done(task._done.load())
 	{}
 
-	Task& operator=(Task&& task)
+	Task& operator=(Task&& task) noexcept
 	{
 		_children = std::move(task._children);
 		_block    = task._block;
@@ -70,7 +74,7 @@ public:
 	}
 
 	/** Run task in the given context. */
-	void run(RunContext& context);
+	void run(RunContext& ctx);
 
 	/** Pretty print task to the given stream (recursively). */
 	void dump(const std::function<void(const std::string&)>& sink,
@@ -84,7 +88,7 @@ public:
 	static std::unique_ptr<Task> simplify(std::unique_ptr<Task>&& task);
 
 	/** Steal a child task from this task (succeeds for PARALLEL only). */
-	Task* steal(RunContext& context);
+	Task* steal(RunContext& ctx);
 
 	/** Prepend a child to this task. */
 	void push_front(Task&& task) {
@@ -100,10 +104,7 @@ public:
 private:
 	using Children = std::deque<std::unique_ptr<Task>>;
 
-	Task(const Task&) = delete;
-	Task& operator=(const Task&) = delete;
-
-	Task* get_task(RunContext& context);
+	Task* get_task(RunContext& ctx);
 
 	void append(std::unique_ptr<Task>&& t) {
 		_children.emplace_back(std::move(t));

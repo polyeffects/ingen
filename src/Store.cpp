@@ -22,6 +22,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -34,7 +35,7 @@ Store::add(Node* o)
 		return;
 	}
 
-	emplace(o->path(), SPtr<Node>(o));
+	emplace(o->path(), std::shared_ptr<Node>(o));
 
 	for (uint32_t i = 0; i < o->num_ports(); ++i) {
 		add(o->port(i));
@@ -77,7 +78,7 @@ Store::find_descendants_end(const const_iterator parent) const
 }
 
 Store::const_range
-Store::children_range(const SPtr<const Node>& o) const
+Store::children_range(const std::shared_ptr<const Node>& o) const
 {
 	const const_iterator parent = find(o->path());
 	if (parent != end()) {
@@ -99,9 +100,9 @@ Store::remove(const iterator top, Objects& removed)
 }
 
 void
-Store::rename(const iterator top, const Raul::Path& new_path)
+Store::rename(const iterator top, const raul::Path& new_path)
 {
-	const Raul::Path old_path = top->first;
+	const raul::Path old_path = top->first;
 
 	// Remove the object and all its descendants
 	Objects removed;
@@ -109,10 +110,10 @@ Store::rename(const iterator top, const Raul::Path& new_path)
 
 	// Rename all the removed objects
 	for (Objects::const_iterator i = removed.begin(); i != removed.end(); ++i) {
-		const Raul::Path path = (i->first == old_path)
+		const raul::Path path = (i->first == old_path)
 			? new_path
 			: new_path.child(
-				Raul::Path(i->first.substr(old_path.base().length() - 1)));
+				raul::Path(i->first.substr(old_path.base().length() - 1)));
 
 		i->second->set_path(path);
 		assert(find(path) == end());  // Shouldn't be dropping objects!
@@ -121,8 +122,8 @@ Store::rename(const iterator top, const Raul::Path& new_path)
 }
 
 unsigned
-Store::child_name_offset(const Raul::Path&   parent,
-                         const Raul::Symbol& symbol,
+Store::child_name_offset(const raul::Path&   parent,
+                         const raul::Symbol& symbol,
                          bool                allow_zero) const
 {
 	unsigned offset = 0;
@@ -133,7 +134,7 @@ Store::child_name_offset(const Raul::Path&   parent,
 		if (offset > 0) {
 			ss << "_" << offset;
 		}
-		if (find(parent.child(Raul::Symbol(ss.str()))) == end() &&
+		if (find(parent.child(raul::Symbol(ss.str()))) == end() &&
 		    (allow_zero || offset > 0)) {
 			break;
 		} else if (offset == 0) {

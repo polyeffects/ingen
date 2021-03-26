@@ -17,54 +17,85 @@
 #include "Port.hpp"
 
 #include "App.hpp"
+#include "GraphBox.hpp"
 #include "GraphWindow.hpp"
 #include "PortMenu.hpp"
 #include "RDFS.hpp"
 #include "Style.hpp"
 #include "WidgetFactory.hpp"
 #include "WindowFactory.hpp"
-#include "ingen_config.h"
 #include "rgba.hpp"
 
-#include "ganv/Module.hpp"
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
-#include "ingen/Interface.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIMap.hpp"
-#include "ingen/client/GraphModel.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
+#include "ingen/client/BlockModel.hpp"
+#include "ingen/client/GraphModel.hpp" // IWYU pragma: keep
+#include "ingen/client/ObjectModel.hpp"
+#include "ingen/client/PluginModel.hpp"
 #include "ingen/client/PortModel.hpp"
+#include "lilv/lilv.h"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
+#include "sord/sordmm.hpp"
+
+#include <glibmm/signalproxy.h>
+#include <gtkmm/menu.h>
+#include <gtkmm/menu_elems.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/menushell.h>
+#include <gtkmm/object.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
 
 #include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
-
-using namespace ingen::client;
+#include <utility>
 
 namespace ingen {
+
+using client::BlockModel;
+using client::GraphModel;
+using client::PluginModel;
+using client::PortModel;
+
 namespace gui {
 
 Port*
-Port::create(App&                  app,
-             Ganv::Module&         module,
-             SPtr<const PortModel> pm,
-             bool                  flip)
+Port::create(App&                                    app,
+             Ganv::Module&                           module,
+             const std::shared_ptr<const PortModel>& pm,
+             bool                                    flip)
 {
 	return new Port(app, module, pm, port_label(app, pm), flip);
 }
 
 /** @param flip Make an input port appear as an output port, and vice versa.
  */
-Port::Port(App&                  app,
-           Ganv::Module&         module,
-           SPtr<const PortModel> pm,
-           const std::string&    name,
-           bool                  flip)
-	: Ganv::Port(module, name,
-	             flip ? (!pm->is_input()) : pm->is_input(),
-	             app.style()->get_port_color(pm.get()))
-	, _app(app)
-	, _port_model(pm)
-	, _entered(false)
-	, _flipped(flip)
+Port::Port(App&                                    app,
+           Ganv::Module&                           module,
+           const std::shared_ptr<const PortModel>& pm,
+           const std::string&                      name,
+           bool                                    flip)
+    : Ganv::Port(module,
+                 name,
+                 flip ? (!pm->is_input()) : pm->is_input(),
+                 app.style()->get_port_color(pm.get()))
+    , _app(app)
+    , _port_model(pm)
+    , _entered(false)
+    , _flipped(flip)
 {
 	assert(pm);
 
@@ -111,7 +142,7 @@ Port::~Port()
 }
 
 std::string
-Port::port_label(App& app, SPtr<const PortModel> pm)
+Port::port_label(App& app, const std::shared_ptr<const PortModel>& pm)
 {
 	if (!pm) {
 		return "";
@@ -124,8 +155,8 @@ Port::port_label(App& app, SPtr<const PortModel> pm)
 			if (name.type() == app.forge().String) {
 				label = name.ptr<char>();
 			} else {
-				const SPtr<const BlockModel> parent(
-					dynamic_ptr_cast<const BlockModel>(pm->parent()));
+				const auto parent =
+				    std::dynamic_pointer_cast<const BlockModel>(pm->parent());
 				if (parent && parent->plugin_model()) {
 					label = parent->plugin_model()->port_human_name(pm->index());
 				}
@@ -148,9 +179,9 @@ Port::ensure_label()
 void
 Port::update_metadata()
 {
-	SPtr<const PortModel> pm = _port_model.lock();
+	auto pm = _port_model.lock();
 	if (pm && _app.can_control(pm.get()) && pm->is_numeric()) {
-		SPtr<const BlockModel> parent = dynamic_ptr_cast<const BlockModel>(pm->parent());
+		auto parent = std::dynamic_pointer_cast<const BlockModel>(pm->parent());
 		if (parent) {
 			float min = 0.0f;
 			float max = 1.0f;
@@ -194,7 +225,7 @@ Port::on_value_changed(double value)
 		return;  // Non-float, unsupported
 	}
 
-	if (current_value.get<float>() == (float)value) {
+	if (current_value.get<float>() == static_cast<float>(value)) {
 		return;  // No change
 	}
 
@@ -230,17 +261,17 @@ Port::on_scale_point_activated(float f)
 Gtk::Menu*
 Port::build_enum_menu()
 {
-	SPtr<const BlockModel> block = dynamic_ptr_cast<BlockModel>(model()->parent());
-	Gtk::Menu*             menu  = Gtk::manage(new Gtk::Menu());
+	auto       block = std::dynamic_pointer_cast<BlockModel>(model()->parent());
+	Gtk::Menu* menu  = Gtk::manage(new Gtk::Menu());
 
 	PluginModel::ScalePoints points = block->plugin_model()->port_scale_points(
 		model()->index());
-	for (auto i = points.begin(); i != points.end(); ++i) {
-		menu->items().push_back(Gtk::Menu_Helpers::MenuElem(i->second));
+	for (const auto& p : points) {
+		menu->items().push_back(Gtk::Menu_Helpers::MenuElem(p.second));
 		Gtk::MenuItem* menu_item = &(menu->items().back());
 		menu_item->signal_activate().connect(
 			sigc::bind(sigc::mem_fun(this, &Port::on_scale_point_activated),
-			           i->first));
+			           p.first));
 	}
 
 	return menu;
@@ -258,9 +289,9 @@ Port::on_uri_activated(const URI& uri)
 Gtk::Menu*
 Port::build_uri_menu()
 {
-	World&                 world = _app.world();
-	SPtr<const BlockModel> block = dynamic_ptr_cast<BlockModel>(model()->parent());
-	Gtk::Menu*             menu  = Gtk::manage(new Gtk::Menu());
+	World&     world = _app.world();
+	auto       block = std::dynamic_pointer_cast<BlockModel>(model()->parent());
+	Gtk::Menu* menu  = Gtk::manage(new Gtk::Menu());
 
 	// Get the port designation, which should be a rdf:Property
 	const Atom& designation_atom = model()->get_property(
@@ -351,7 +382,7 @@ peak_color(float peak)
 	static const uint32_t peak_min = 0xFF561FC0;
 	static const uint32_t peak_max = 0xFF0A38C0;
 
-	if (peak < 1.0) {
+	if (peak < 1.0f) {
 		return rgba_interpolate(min, max, peak);
 	} else {
 		return rgba_interpolate(peak_min, peak_max, fminf(peak, 2.0f) - 1.0f);
@@ -373,10 +404,10 @@ Port::activity(const Atom& value)
 GraphBox*
 Port::get_graph_box() const
 {
-	SPtr<const GraphModel> graph = dynamic_ptr_cast<const GraphModel>(model()->parent());
-	GraphBox*              box   = _app.window_factory()->graph_box(graph);
+	auto      graph = std::dynamic_pointer_cast<const GraphModel>(model()->parent());
+	GraphBox* box   = _app.window_factory()->graph_box(graph);
 	if (!box) {
-		graph = dynamic_ptr_cast<const GraphModel>(model()->parent()->parent());
+		graph = std::dynamic_pointer_cast<const GraphModel>(model()->parent()->parent());
 		box   = _app.window_factory()->graph_box(graph);
 	}
 	return box;
@@ -512,9 +543,11 @@ bool
 Port::on_selected(gboolean b)
 {
 	if (b) {
-		SPtr<const PortModel> pm = _port_model.lock();
+		auto pm = _port_model.lock();
 		if (pm) {
-			SPtr<const BlockModel> block = dynamic_ptr_cast<const BlockModel>(pm->parent());
+			auto block =
+			    std::dynamic_pointer_cast<const BlockModel>(pm->parent());
+
 			GraphWindow* win = _app.window_factory()->parent_graph_window(block);
 			if (win && win->documentation_is_visible() && block->plugin_model()) {
 				bool html = false;

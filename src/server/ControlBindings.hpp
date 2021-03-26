@@ -19,20 +19,26 @@
 
 #include "BufferRef.hpp"
 
-#include "ingen/types.hpp"
 #include "lv2/atom/forge.h"
 #include "raul/Maid.hpp"
 
-#include <boost/intrusive/options.hpp>
 #include <boost/intrusive/set.hpp>
 #include <boost/intrusive/set_hook.hpp>
 
 #include <atomic>
 #include <cstdint>
-#include <utility>
+#include <memory>
 #include <vector>
 
-namespace Raul { class Path; }
+namespace raul { class Path; }
+
+namespace boost {
+namespace intrusive {
+
+template <class Compare> struct compare;
+
+} // namespace intrusive
+} // namespace boost
 
 namespace ingen {
 
@@ -73,8 +79,8 @@ public:
 
 	/** One binding of a controller to a port. */
 	struct Binding : public boost::intrusive::set_base_hook<>,
-	                 public Raul::Maid::Disposable {
-		Binding(Key k=Key(), PortImpl* p=nullptr) : key(std::move(k)), port(p) {}
+	                 public raul::Maid::Disposable {
+		Binding(Key k=Key(), PortImpl* p=nullptr) : key(k), port(p) {}
 
 		inline bool operator<(const Binding& rhs) const { return key < rhs.key; }
 
@@ -112,7 +118,7 @@ public:
 	void post_process(RunContext& ctx, Buffer* buffer);
 
 	/** Get all bindings for `path` or children of `path`. */
-	void get_all(const Raul::Path& path, std::vector<Binding*>& bindings);
+	void get_all(const raul::Path& path, std::vector<Binding*>& bindings);
 
 	/** Remove a set of bindings from an earlier call to get_all(). */
 	void remove(RunContext& ctx, const std::vector<Binding*>& bindings);
@@ -125,28 +131,28 @@ private:
 	static Key
 	midi_event_key(uint16_t size, const uint8_t* buf, uint16_t& value);
 
-	void set_port_value(RunContext& context,
+	void set_port_value(RunContext& ctx,
 	                    PortImpl*   port,
 	                    Type        type,
-	                    int16_t     value);
+	                    int16_t     value) const;
 
-	bool finish_learn(RunContext& context, Key key);
+	bool finish_learn(RunContext& ctx, Key key);
 
-	static float control_to_port_value(RunContext& context,
-	                            const PortImpl* port,
-	                            Type            type,
-	                            int16_t         value);
+	static float control_to_port_value(RunContext&     ctx,
+	                                   const PortImpl* port,
+	                                   Type            type,
+	                                   int16_t         value);
 
-	static int16_t port_value_to_control(RunContext& context,
+	static int16_t port_value_to_control(RunContext& ctx,
 	                                     PortImpl*   port,
 	                                     Type        type,
 	                                     const Atom& value_atom);
 
-	Engine&               _engine;
-	std::atomic<Binding*> _learn_binding;
-	SPtr<Bindings>        _bindings;
-	BufferRef             _feedback;
-	LV2_Atom_Forge        _forge;
+	Engine&                   _engine;
+	std::atomic<Binding*>     _learn_binding;
+	std::shared_ptr<Bindings> _bindings;
+	BufferRef                 _feedback;
+	LV2_Atom_Forge            _forge;
 };
 
 } // namespace server

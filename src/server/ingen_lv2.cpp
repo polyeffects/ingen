@@ -43,9 +43,8 @@
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
 #include "ingen/ingen.h"
+#include "ingen/memory.hpp"
 #include "ingen/runtime_paths.hpp"
-#include "ingen/types.hpp"
-#include "lv2/atom/atom.h"
 #include "lv2/atom/atom.h"
 #include "lv2/atom/util.h"
 #include "lv2/buf-size/buf-size.h"
@@ -75,14 +74,17 @@
 #include <utility>
 #include <vector>
 
-#define NS_RDF   "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-#define NS_RDFS  "http://www.w3.org/2000/01/rdf-schema#"
-
 namespace ingen {
+
+class Atom;
+
+namespace server {
+
+class GraphImpl;
 
 /** Record of a graph in this bundle. */
 struct LV2Graph : public Parser::ResourceRecord {
-	LV2Graph(Parser::ResourceRecord record);
+	explicit LV2Graph(Parser::ResourceRecord record);
 
 	LV2_Descriptor descriptor;
 };
@@ -92,25 +94,19 @@ class Lib {
 public:
 	explicit Lib(const char* bundle_path);
 
-	using Graphs = std::vector<SPtr<const LV2Graph>>;
+	using Graphs = std::vector<std::shared_ptr<const LV2Graph>>;
 
 	Graphs graphs;
 };
 
-namespace server {
-
-class LV2Driver;
-
-void signal_main(RunContext& context, LV2Driver* driver);
-
 inline size_t
 ui_ring_size(SampleCount block_length)
 {
-	return std::max((size_t)8192, (size_t)block_length * 16);
+	return std::max(static_cast<size_t>(8192u),
+	                static_cast<size_t>(block_length) * 16u);
 }
 
-class LV2Driver : public ingen::server::Driver
-                , public ingen::AtomSink
+class LV2Driver : public Driver, public ingen::AtomSink
 {
 public:
 	LV2Driver(Engine&     engine,
@@ -122,7 +118,7 @@ public:
 		, _reader(engine.world().uri_map(),
 		          engine.world().uris(),
 		          engine.world().log(),
-		          *engine.world().interface().get())
+		          *engine.world().interface())
 		, _writer(engine.world().uri_map(),
 		          engine.world().uris(),
 		          *this)
@@ -141,9 +137,9 @@ public:
 
 	bool dynamic_ports() const override { return !_instantiated; }
 
-	void pre_process_port(RunContext& context, EnginePort* port) {
+	void pre_process_port(RunContext& ctx, EnginePort* port) {
 		const URIs&       uris       = _engine.world().uris();
-		const SampleCount nframes    = context.nframes();
+		const SampleCount nframes    = ctx.nframes();
 		DuplexPort*       graph_port = port->graph_port();
 		Buffer*           graph_buf  = graph_port->buffer(0).get();
 		void*             lv2_buf    = port->buffer();
@@ -151,11 +147,16 @@ public:
 		if (graph_port->is_a(PortType::AUDIO) || graph_port->is_a(PortType::CV)) {
 			graph_port->set_driver_buffer(lv2_buf, nframes * sizeof(float));
 		} else if (graph_port->buffer_type() == uris.atom_Sequence) {
-			graph_port->set_driver_buffer(lv2_buf, lv2_atom_total_size((LV2_Atom*)lv2_buf));
+			graph_port->set_driver_buffer(lv2_buf,
+			                              lv2_atom_total_size(
+			                                  static_cast<LV2_Atom*>(lv2_buf)));
+
 			if (graph_port->symbol() == "control") {  // TODO: Safe to use index?
-				LV2_Atom_Sequence* seq      = (LV2_Atom_Sequence*)lv2_buf;
-				bool               enqueued = false;
-				LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
+				auto* seq = reinterpret_cast<LV2_Atom_Sequence*>(lv2_buf);
+
+				bool enqueued = false;
+				LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+				{
 					if (AtomReader::is_message(uris, &ev->body)) {
 						enqueued = enqueue_message(&ev->body) || enqueued;
 					}
@@ -169,13 +170,13 @@ public:
 		}
 
 		if (graph_port->is_input()) {
-			graph_port->monitor(context);
+			graph_port->monitor(ctx);
 		} else {
-			graph_buf->prepare_write(context);
+			graph_buf->prepare_write(ctx);
 		}
 	}
 
-	void post_process_port(RunContext& context, EnginePort* port) {
+	static void post_process_port(RunContext&, EnginePort* port) {
 		DuplexPort* graph_port = port->graph_port();
 
 		// No copying necessary, host buffers are used directly
@@ -189,7 +190,8 @@ public:
 		_engine.locate(_frame_time, nframes);
 
 		// Notify buffer is a Chunk with size set to the available space
-		_notify_capacity = ((LV2_Atom_Sequence*)_ports[1]->buffer())->atom.size;
+		_notify_capacity =
+		    static_cast<LV2_Atom_Sequence*>(_ports[1]->buffer())->atom.size;
 
 		for (auto& p : _ports) {
 			pre_process_port(_engine.run_context(), p);
@@ -217,7 +219,7 @@ public:
 	virtual void       set_root_graph(GraphImpl* graph) { _root_graph = graph; }
 	virtual GraphImpl* root_graph()                     { return _root_graph; }
 
-	EnginePort* get_port(const Raul::Path& path) override {
+	EnginePort* get_port(const raul::Path& path) override {
 		for (auto& p : _ports) {
 			if (p->graph_port()->path() == path) {
 				return p;
@@ -228,7 +230,7 @@ public:
 	}
 
 	/** Add a port.  Called only during init or restore. */
-	void add_port(RunContext& context, EnginePort* port) override {
+	void add_port(RunContext&, EnginePort* port) override {
 		const uint32_t index = port->graph_port()->index();
 		if (_ports.size() <= index) {
 			_ports.resize(index + 1);
@@ -237,7 +239,7 @@ public:
 	}
 
 	/** Remove a port.  Called only during init or restore. */
-	void remove_port(RunContext& context, EnginePort* port) override {
+	void remove_port(RunContext&, EnginePort* port) override {
 		const uint32_t index = port->graph_port()->index();
 		_ports[index] = nullptr;
 	}
@@ -249,11 +251,11 @@ public:
 	void unregister_port(EnginePort& port) override {}
 
 	/** Unused since LV2 has no dynamic ports. */
-	void rename_port(const Raul::Path& old_path,
-	                 const Raul::Path& new_path) override {}
+	void rename_port(const raul::Path& old_path,
+	                 const raul::Path& new_path) override {}
 
 	/** Unused since LV2 has no dynamic ports. */
-	void port_property(const Raul::Path& path,
+	void port_property(const raul::Path& path,
 	                   const URI&        uri,
 	                   const Atom&       value) override {}
 
@@ -262,17 +264,20 @@ public:
 		return new EnginePort(graph_port);
 	}
 
-	void append_time_events(RunContext& context, Buffer& buffer) override {
-		const URIs&        uris = _engine.world().uris();
-		LV2_Atom_Sequence* seq  = (LV2_Atom_Sequence*)_ports[0]->buffer();
+	void append_time_events(RunContext&, Buffer& buffer) override {
+		const URIs& uris = _engine.world().uris();
+		auto*       seq  = static_cast<LV2_Atom_Sequence*>(_ports[0]->buffer());
+
 		LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
 			if (ev->body.type == uris.atom_Object) {
-				const LV2_Atom_Object* obj = (LV2_Atom_Object*)&ev->body;
+				const LV2_Atom_Object* obj =
+				    reinterpret_cast<LV2_Atom_Object*>(&ev->body);
+
 				if (obj->body.otype == uris.time_Position) {
 					buffer.append_event(ev->time.frames,
 					                    ev->body.size,
 					                    ev->body.type,
-					                    (const uint8_t*)(&ev->body + 1));
+					                    reinterpret_cast<const uint8_t*>(&ev->body + 1));
 				}
 			}
 		}
@@ -291,7 +296,7 @@ public:
 		return true;
 	}
 
-	Raul::Semaphore& main_sem() { return _main_sem; }
+	raul::Semaphore& main_sem() { return _main_sem; }
 
 	/** AtomSink::write implementation called by the PostProcessor in the main
 	 * thread to write responses to the UI.
@@ -320,24 +325,26 @@ public:
 			buf = realloc(buf, sizeof(LV2_Atom) + atom.size);
 			memcpy(buf, &atom, sizeof(LV2_Atom));
 
-			if (!_from_ui.read(atom.size, (char*)buf + sizeof(LV2_Atom))) {
-				_engine.log().rt_error("Error reading body from from-UI ring\n");
+			if (!_from_ui.read(atom.size,
+			                   static_cast<char*>(buf) + sizeof(LV2_Atom))) {
+				_engine.log().rt_error(
+				    "Error reading body from from-UI ring\n");
 				break;
 			}
 
-			_reader.write((LV2_Atom*)buf);
+			_reader.write(static_cast<LV2_Atom*>(buf));
 			read += sizeof(LV2_Atom) + atom.size;
 		}
 		free(buf);
 	}
 
-	void flush_to_ui(RunContext& context) {
+	void flush_to_ui(RunContext&) {
 		if (_ports.size() < 2) {
 			_engine.log().rt_error("Standard control ports are not present\n");
 			return;
 		}
 
-		LV2_Atom_Sequence* seq = (LV2_Atom_Sequence*)_ports[1]->buffer();
+		auto* seq = static_cast<LV2_Atom_Sequence*>(_ports[1]->buffer());
 		if (!seq) {
 			_engine.log().rt_error("Notify output not connected\n");
 			return;
@@ -361,8 +368,9 @@ public:
 				break;  // Output port buffer full, resume next time
 			}
 
-			LV2_Atom_Event* ev = (LV2_Atom_Event*)(
-				(uint8_t*)seq + lv2_atom_total_size(&seq->atom));
+			auto* ev = reinterpret_cast<LV2_Atom_Event*>(
+				reinterpret_cast<uint8_t*>(seq) +
+				lv2_atom_total_size(&seq->atom));
 
 			ev->time.frames = 0;  // TODO: Time?
 			ev->body        = atom;
@@ -400,32 +408,36 @@ public:
 private:
 	Engine&          _engine;
 	Ports            _ports;
-	Raul::Semaphore  _main_sem;
+	raul::Semaphore  _main_sem;
 	AtomReader       _reader;
 	AtomWriter       _writer;
-	Raul::RingBuffer _from_ui;
-	Raul::RingBuffer _to_ui;
+	raul::RingBuffer _from_ui;
+	raul::RingBuffer _to_ui;
 	GraphImpl*       _root_graph;
 	uint32_t         _notify_capacity;
 	SampleCount      _block_length;
 	size_t           _seq_size;
 	SampleCount      _sample_rate;
 	SampleCount      _frame_time;
-	Raul::Semaphore  _to_ui_overflow_sem;
+	raul::Semaphore  _to_ui_overflow_sem;
 	bool             _to_ui_overflow;
 	bool             _instantiated;
 };
 
-} // namespace server
-} // namespace ingen
+struct IngenPlugin {
+	std::unique_ptr<World>       world;
+	std::shared_ptr<Engine>      engine;
+	std::unique_ptr<std::thread> main;
+	LV2_URID_Map*                map  = nullptr;
+	int                          argc = 0;
+	char**                       argv = nullptr;
+};
 
 extern "C" {
 
-using namespace ingen;
-using namespace ingen::server;
-
 static void
-ingen_lv2_main(const SPtr<Engine>& engine, const SPtr<LV2Driver>& driver)
+ingen_lv2_main(const std::shared_ptr<Engine>&    engine,
+               const std::shared_ptr<LV2Driver>& driver)
 {
 	while (true) {
 		// Wait until there is work to be done
@@ -441,22 +453,6 @@ ingen_lv2_main(const SPtr<Engine>& engine, const SPtr<LV2Driver>& driver)
 	}
 }
 
-struct IngenPlugin {
-	IngenPlugin()
-		: main(nullptr)
-		, map(nullptr)
-		, argc(0)
-		, argv(nullptr)
-	{}
-
-	UPtr<ingen::World> world;
-	SPtr<Engine>       engine;
-	UPtr<std::thread>  main;
-	LV2_URID_Map*      map;
-	int                argc;
-	char**             argv;
-};
-
 static Lib::Graphs
 find_graphs(const URI& manifest_uri)
 {
@@ -470,7 +466,7 @@ find_graphs(const URI& manifest_uri)
 
 	Lib::Graphs graphs;
 	for (const auto& r : resources) {
-		graphs.push_back(SPtr<const LV2Graph>(new LV2Graph(r)));
+		graphs.push_back(std::make_shared<LV2Graph>(r));
 	}
 
 	return graphs;
@@ -489,13 +485,13 @@ ingen_instantiate(const LV2_Descriptor*    descriptor,
 	const LV2_Options_Option* options = nullptr;
 	for (int i = 0; features[i]; ++i) {
 		if (!strcmp(features[i]->URI, LV2_URID__map)) {
-			map = (LV2_URID_Map*)features[i]->data;
+			map = static_cast<LV2_URID_Map*>(features[i]->data);
 		} else if (!strcmp(features[i]->URI, LV2_URID__unmap)) {
-			unmap = (LV2_URID_Unmap*)features[i]->data;
+			unmap = static_cast<LV2_URID_Unmap*>(features[i]->data);
 		} else if (!strcmp(features[i]->URI, LV2_LOG__log)) {
-			log = (LV2_Log_Log*)features[i]->data;
+			log = static_cast<LV2_Log_Log*>(features[i]->data);
 		} else if (!strcmp(features[i]->URI, LV2_OPTIONS__options)) {
-			options = (const LV2_Options_Option*)features[i]->data;
+			options = static_cast<const LV2_Options_Option*>(features[i]->data);
 		}
 	}
 
@@ -512,10 +508,14 @@ ingen_instantiate(const LV2_Descriptor*    descriptor,
 
 	set_bundle_path(bundle_path);
 	const std::string manifest_path = ingen::bundle_file_path("manifest.ttl");
-	SerdNode          manifest_node = serd_node_new_file_uri(
-		(const uint8_t*)manifest_path.c_str(), nullptr, nullptr, true);
+	SerdNode          manifest_node =
+	    serd_node_new_file_uri(reinterpret_cast<const uint8_t*>(
+	                               manifest_path.c_str()),
+	                           nullptr,
+	                           nullptr,
+	                           true);
 
-	Lib::Graphs graphs = find_graphs(URI((const char*)manifest_node.buf));
+	Lib::Graphs graphs = find_graphs(URI(reinterpret_cast<const char*>(manifest_node.buf)));
 	serd_node_free(&manifest_node);
 
 	const LV2Graph* graph = nullptr;
@@ -531,9 +531,9 @@ ingen_instantiate(const LV2_Descriptor*    descriptor,
 		return nullptr;
 	}
 
-	IngenPlugin* plugin = new IngenPlugin();
+	auto* plugin = new IngenPlugin();
 	plugin->map   = map;
-	plugin->world = UPtr<ingen::World>(new ingen::World(map, unmap, log));
+	plugin->world = make_unique<ingen::World>(map, unmap, log);
 	plugin->world->load_configuration(plugin->argc, plugin->argv);
 
 	LV2_URID bufsz_max    = map->map(map->handle, LV2_BUF_SIZE__maxBlockLength);
@@ -544,9 +544,9 @@ ingen_instantiate(const LV2_Descriptor*    descriptor,
 	if (options) {
 		for (const LV2_Options_Option* o = options; o->key; ++o) {
 			if (o->key == bufsz_max && o->type == atom_Int) {
-				block_length = *(const int32_t*)o->value;
+				block_length = *static_cast<const int32_t*>(o->value);
 			} else if (o->key == bufsz_seq && o->type == atom_Int) {
-				seq_size = *(const int32_t*)o->value;
+				seq_size = *static_cast<const int32_t*>(o->value);
 			}
 		}
 	}
@@ -566,22 +566,22 @@ ingen_instantiate(const LV2_Descriptor*    descriptor,
 		"queue-size",
 		plugin->world->forge().make(std::max(block_length, seq_size) * 4));
 
-	SPtr<server::Engine> engine(new server::Engine(*plugin->world));
+	auto engine = std::make_shared<Engine>(*plugin->world);
 	plugin->engine = engine;
 	plugin->world->set_engine(engine);
 
-	SPtr<Interface> interface = engine->interface();
+	std::shared_ptr<Interface> interface = engine->interface();
 
 	plugin->world->set_interface(interface);
 
-	server::ThreadManager::set_flag(server::THREAD_PRE_PROCESS);
-	server::ThreadManager::single_threaded = true;
+	ThreadManager::set_flag(THREAD_PRE_PROCESS);
+	ThreadManager::single_threaded = true;
 
-	LV2Driver* driver = new LV2Driver(*engine.get(), block_length, seq_size, rate);
-	engine->set_driver(SPtr<ingen::server::Driver>(driver));
+	auto* driver = new LV2Driver(*engine, block_length, seq_size, rate);
+	engine->set_driver(std::shared_ptr<Driver>(driver));
 
 	engine->activate();
-	server::ThreadManager::single_threaded = true;
+	ThreadManager::single_threaded = true;
 
 	std::lock_guard<std::mutex> lock(plugin->world->rdf_mutex());
 
@@ -605,22 +605,20 @@ ingen_instantiate(const LV2_Descriptor*    descriptor,
 
 	/* Register client after loading graph so the to-ui ring does not overflow.
 	   Since we are not yet rolling, it won't be drained, causing a deadlock. */
-	SPtr<Interface> client(&driver->writer(), NullDeleter<Interface>);
+	std::shared_ptr<Interface> client(&driver->writer(), NullDeleter<Interface>);
 	interface->set_respondee(client);
 	engine->register_client(client);
 
 	driver->set_instantiated(true);
-	return (LV2_Handle)plugin;
+	return static_cast<LV2_Handle>(plugin);
 }
 
 static void
 ingen_connect_port(LV2_Handle instance, uint32_t port, void* data)
 {
-	using namespace ingen::server;
-
-	IngenPlugin*           me     = (IngenPlugin*)instance;
-	server::Engine*        engine = (server::Engine*)me->world->engine().get();
-	const SPtr<LV2Driver>& driver = static_ptr_cast<LV2Driver>(engine->driver());
+	auto*      me     = static_cast<IngenPlugin*>(instance);
+	Engine*    engine = static_cast<Engine*>(me->world->engine().get());
+	const auto driver = std::static_pointer_cast<LV2Driver>(engine->driver());
 	if (port < driver->ports().size()) {
 		driver->ports().at(port)->set_buffer(data);
 	} else {
@@ -631,9 +629,9 @@ ingen_connect_port(LV2_Handle instance, uint32_t port, void* data)
 static void
 ingen_activate(LV2_Handle instance)
 {
-	IngenPlugin*           me     = (IngenPlugin*)instance;
-	SPtr<server::Engine>   engine = static_ptr_cast<server::Engine>(me->world->engine());
-	const SPtr<LV2Driver>& driver = static_ptr_cast<LV2Driver>(engine->driver());
+	auto*      me     = static_cast<IngenPlugin*>(instance);
+	auto       engine = std::static_pointer_cast<Engine>(me->world->engine());
+	const auto driver = std::static_pointer_cast<LV2Driver>(engine->driver());
 	engine->activate();
 	me->main = make_unique<std::thread>(ingen_lv2_main, engine, driver);
 }
@@ -641,12 +639,12 @@ ingen_activate(LV2_Handle instance)
 static void
 ingen_run(LV2_Handle instance, uint32_t sample_count)
 {
-	IngenPlugin*           me     = (IngenPlugin*)instance;
-	SPtr<server::Engine>   engine = static_ptr_cast<server::Engine>(me->world->engine());
-	const SPtr<LV2Driver>& driver = static_ptr_cast<LV2Driver>(engine->driver());
+	auto*      me     = static_cast<IngenPlugin*>(instance);
+	auto       engine = std::static_pointer_cast<Engine>(me->world->engine());
+	const auto driver = std::static_pointer_cast<LV2Driver>(engine->driver());
 
-	server::ThreadManager::set_flag(ingen::server::THREAD_PROCESS);
-	server::ThreadManager::set_flag(ingen::server::THREAD_IS_REAL_TIME);
+	ThreadManager::set_flag(THREAD_PROCESS);
+	ThreadManager::set_flag(THREAD_IS_REAL_TIME);
 
 	driver->run(sample_count);
 }
@@ -654,7 +652,7 @@ ingen_run(LV2_Handle instance, uint32_t sample_count)
 static void
 ingen_deactivate(LV2_Handle instance)
 {
-	IngenPlugin* me = (IngenPlugin*)instance;
+	auto* me = static_cast<IngenPlugin*>(instance);
 	me->world->engine()->deactivate();
 	if (me->main) {
 		me->main->join();
@@ -665,9 +663,9 @@ ingen_deactivate(LV2_Handle instance)
 static void
 ingen_cleanup(LV2_Handle instance)
 {
-	IngenPlugin* me = (IngenPlugin*)instance;
-	me->world->set_engine(SPtr<ingen::server::Engine>());
-	me->world->set_interface(SPtr<ingen::Interface>());
+	auto* me = static_cast<IngenPlugin*>(instance);
+	me->world->set_engine(nullptr);
+	me->world->set_interface(nullptr);
 	if (me->main) {
 		me->main->join();
 		me->main.reset();
@@ -684,9 +682,9 @@ get_state_features(const LV2_Feature* const* features,
 {
 	for (int i = 0; features[i]; ++i) {
 		if (map && !strcmp(features[i]->URI, LV2_STATE__mapPath)) {
-			*map = (LV2_State_Map_Path*)features[i]->data;
+			*map = static_cast<LV2_State_Map_Path*>(features[i]->data);
 		} else if (make && !strcmp(features[i]->URI, LV2_STATE__makePath)) {
-			*make = (LV2_State_Make_Path*)features[i]->data;
+			*make = static_cast<LV2_State_Make_Path*>(features[i]->data);
 		}
 	}
 }
@@ -698,7 +696,7 @@ ingen_save(LV2_Handle                instance,
            uint32_t                  flags,
            const LV2_Feature* const* features)
 {
-	IngenPlugin* plugin = (IngenPlugin*)instance;
+	auto* plugin = static_cast<IngenPlugin*>(instance);
 
 	LV2_State_Map_Path*  map_path  = nullptr;
 	LV2_State_Make_Path* make_path = nullptr;
@@ -715,7 +713,7 @@ ingen_save(LV2_Handle                instance,
 	char* real_path  = make_path->path(make_path->handle, "main.ttl");
 	char* state_path = map_path->abstract_path(map_path->handle, real_path);
 
-	auto root = plugin->world->store()->find(Raul::Path("/"));
+	auto root = plugin->world->store()->find(raul::Path("/"));
 
 	{
 		std::lock_guard<std::mutex> lock(plugin->world->rdf_mutex());
@@ -745,7 +743,7 @@ ingen_restore(LV2_Handle                  instance,
               uint32_t                    flags,
               const LV2_Feature* const*   features)
 {
-	IngenPlugin* plugin = (IngenPlugin*)instance;
+	auto* plugin = static_cast<IngenPlugin*>(instance);
 
 	LV2_State_Map_Path* map_path = nullptr;
 	get_state_features(features, &map_path, nullptr);
@@ -755,13 +753,13 @@ ingen_restore(LV2_Handle                  instance,
 	}
 
 	LV2_URID ingen_file = plugin->map->map(plugin->map->handle, INGEN__file);
-	size_t   size;
-	uint32_t type;
-	uint32_t valflags;
+	size_t   size       = 0;
+	uint32_t type       = 0;
+	uint32_t valflags   = 0;
 
 	// Get abstract path to graph file
-	const char* path = (const char*)retrieve(
-		handle, ingen_file, &size, &type, &valflags);
+	const char* path = static_cast<const char*>(
+		retrieve(handle, ingen_file, &size, &type, &valflags));
 	if (!path) {
 		return LV2_STATE_ERR_NO_PROPERTY;
 	}
@@ -774,7 +772,7 @@ ingen_restore(LV2_Handle                  instance,
 
 #if 0
 	// Remove existing root graph contents
-	SPtr<Engine> engine = plugin->engine;
+	std::shared_ptr<Engine> engine = plugin->engine;
 	for (const auto& b : engine->root_graph()->blocks()) {
 		plugin->world->interface()->del(b.uri());
 	}
@@ -809,6 +807,7 @@ ingen_extension_data(const char* uri)
 
 LV2Graph::LV2Graph(Parser::ResourceRecord record)
 	: Parser::ResourceRecord(std::move(record))
+	, descriptor()
 {
 	descriptor.URI            = uri.c_str();
 	descriptor.instantiate    = ingen_instantiate;
@@ -824,10 +823,14 @@ Lib::Lib(const char* bundle_path)
 {
 	ingen::set_bundle_path(bundle_path);
 	const std::string manifest_path = ingen::bundle_file_path("manifest.ttl");
-	SerdNode          manifest_node = serd_node_new_file_uri(
-		(const uint8_t*)manifest_path.c_str(), nullptr, nullptr, true);
+	SerdNode          manifest_node =
+	    serd_node_new_file_uri(reinterpret_cast<const uint8_t*>(
+	                               manifest_path.c_str()),
+	                           nullptr,
+	                           nullptr,
+	                           true);
 
-	graphs = find_graphs(URI((const char*)manifest_node.buf));
+	graphs = find_graphs(URI(reinterpret_cast<const char*>(manifest_node.buf)));
 
 	serd_node_free(&manifest_node);
 }
@@ -835,16 +838,22 @@ Lib::Lib(const char* bundle_path)
 static void
 lib_cleanup(LV2_Lib_Handle handle)
 {
-	Lib* lib = (Lib*)handle;
+	Lib* lib = static_cast<Lib*>(handle);
 	delete lib;
 }
 
 static const LV2_Descriptor*
 lib_get_plugin(LV2_Lib_Handle handle, uint32_t index)
 {
-	Lib* lib = (Lib*)handle;
+	Lib* lib = static_cast<Lib*>(handle);
 	return index < lib->graphs.size() ? &lib->graphs[index]->descriptor : nullptr;
 }
+
+} // extern "C"
+} // namespace server
+} // namespace ingen
+
+extern "C" {
 
 /** LV2 plugin library entry point */
 LV2_SYMBOL_EXPORT
@@ -853,16 +862,16 @@ lv2_lib_descriptor(const char*              bundle_path,
                    const LV2_Feature*const* features)
 {
 	static const uint32_t desc_size = sizeof(LV2_Lib_Descriptor);
-	Lib*                  lib       = new Lib(bundle_path);
+	auto*                 lib       = new ingen::server::Lib(bundle_path);
 
 	// FIXME: memory leak.  I think the LV2_Lib_Descriptor API is botched :(
-	LV2_Lib_Descriptor* desc = (LV2_Lib_Descriptor*)malloc(desc_size);
+	auto* desc = static_cast<LV2_Lib_Descriptor*>(malloc(desc_size));
 	desc->handle     = lib;
 	desc->size       = desc_size;
-	desc->cleanup    = lib_cleanup;
-	desc->get_plugin = lib_get_plugin;
+	desc->cleanup    = ingen::server::lib_cleanup;
+	desc->get_plugin = ingen::server::lib_get_plugin;
 
 	return desc;
 }
 
-} // extern "C"
+}

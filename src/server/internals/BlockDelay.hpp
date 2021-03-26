@@ -21,13 +21,22 @@
 #include "InternalBlock.hpp"
 #include "types.hpp"
 
+namespace raul {
+class Symbol;
+} // namespace raul
+
 namespace ingen {
+
+class URIs;
+
 namespace server {
 
-class InputPort;
-class OutputPort;
-class InternalPlugin;
 class BufferFactory;
+class GraphImpl;
+class InputPort;
+class InternalPlugin;
+class OutputPort;
+class RunContext;
 
 namespace internals {
 
@@ -36,16 +45,16 @@ class BlockDelayNode : public InternalBlock
 public:
 	BlockDelayNode(InternalPlugin*     plugin,
 	               BufferFactory&      bufs,
-	               const Raul::Symbol& symbol,
+	               const raul::Symbol& symbol,
 	               bool                polyphonic,
 	               GraphImpl*          parent,
 	               SampleRate          srate);
 
-	~BlockDelayNode();
+	~BlockDelayNode() override;
 
 	void activate(BufferFactory& bufs) override;
 
-	void run(RunContext& context) override;
+	void run(RunContext& ctx) override;
 
 	static InternalPlugin* internal_plugin(URIs& uris);
 
@@ -55,8 +64,8 @@ private:
 	BufferRef   _buffer;
 };
 
+} // namespace internals
 } // namespace server
 } // namespace ingen
-} // namespace internals
 
 #endif // INGEN_INTERNALS_BLOCKDELAY_HPP

@@ -16,7 +16,8 @@
 
 #include "ingen/Forge.hpp"
 #include "ingen/Log.hpp"
-#include "ingen/Resource.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
 #include "ingen/client/ObjectModel.hpp"
 #include "lilv/lilv.h"
@@ -115,7 +116,7 @@ datatypes(World& world, URISet& types, bool super)
 }
 
 URISet
-types(World& world, SPtr<const client::ObjectModel> model)
+types(World& world, const std::shared_ptr<const client::ObjectModel>& model)
 {
 	using PropIter  = Properties::const_iterator;
 	using PropRange = std::pair<PropIter, PropIter>;
@@ -145,7 +146,8 @@ types(World& world, SPtr<const client::ObjectModel> model)
 }
 
 URISet
-properties(World& world, SPtr<const client::ObjectModel> model)
+properties(World&                                            world,
+           const std::shared_ptr<const client::ObjectModel>& model)
 {
 	URISet properties;
 	URISet types = rdfs::types(world, model);

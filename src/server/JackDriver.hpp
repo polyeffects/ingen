@@ -18,35 +18,48 @@
 #define INGEN_ENGINE_JACKAUDIODRIVER_HPP
 
 #include "Driver.hpp"
-#include "EnginePort.hpp"
-#include "ingen_config.h"
+#include "EnginePort.hpp" // IWYU pragma: keep
+#include "types.hpp"
 
-#include "ingen/types.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/memory.hpp" // IWYU pragma: keep
 #include "lv2/atom/forge.h"
 #include "raul/Semaphore.hpp"
 
+#include <boost/intrusive/slist.hpp>
 #include <jack/jack.h>
 #include <jack/thread.h>
-#include <jack/transport.h>
-#ifdef INGEN_JACK_SESSION
-#include <jack/session.h>
-#endif
+#include <jack/types.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <memory>
 #include <string>
 
-namespace Raul { class Path; }
+namespace raul {
+class Path;
+} // namespace raul
+
+namespace boost {
+namespace intrusive {
+
+template <bool Enabled> struct cache_last;
+
+} // namespace intrusive
+} // namespace boost
 
 namespace ingen {
+
+class Atom;
+
 namespace server {
 
+class Buffer;
 class DuplexPort;
 class Engine;
-class GraphImpl;
-class JackDriver;
-class PortImpl;
+class RunContext;
 
 /** The Jack Driver.
  *
@@ -60,7 +73,7 @@ class JackDriver : public Driver
 {
 public:
 	explicit JackDriver(Engine& engine);
-	~JackDriver();
+	~JackDriver() override;
 
 	bool attach(const std::string& server_name,
 	            const std::string& client_name,
@@ -72,12 +85,12 @@ public:
 	bool dynamic_ports() const override { return true; }
 
 	EnginePort* create_port(DuplexPort* graph_port) override;
-	EnginePort* get_port(const Raul::Path& path) override;
+	EnginePort* get_port(const raul::Path& path) override;
 
-	void rename_port(const Raul::Path& old_path, const Raul::Path& new_path) override;
-	void port_property(const Raul::Path& path, const URI& uri, const Atom& value) override;
-	void add_port(RunContext& context, EnginePort* port) override;
-	void remove_port(RunContext& context, EnginePort* port) override;
+	void rename_port(const raul::Path& old_path, const raul::Path& new_path) override;
+	void port_property(const raul::Path& path, const URI& uri, const Atom& value) override;
+	void add_port(RunContext& ctx, EnginePort* port) override;
+	void remove_port(RunContext& ctx, EnginePort* port) override;
 	void register_port(EnginePort& port) override;
 	void unregister_port(EnginePort& port) override;
 
@@ -86,7 +99,7 @@ public:
 	inline const jack_position_t* position()        { return &_position; }
 	inline jack_transport_state_t transport_state() { return _transport_state; }
 
-	void append_time_events(RunContext& context, Buffer& buffer) override;
+	void append_time_events(RunContext& ctx, Buffer& buffer) override;
 
 	int real_time_priority() override {
 		return jack_client_real_time_priority(_client);
@@ -106,52 +119,42 @@ public:
 private:
 	friend class JackPort;
 
+	static void thread_init_cb(void* jack_driver);
+
 	// Static JACK callbacks which call the non-static callbacks (methods)
-	inline static void thread_init_cb(void* const jack_driver) {
-		return ((JackDriver*)jack_driver)->_thread_init_cb();
-	}
 	inline static void shutdown_cb(void* const jack_driver) {
-		return ((JackDriver*)jack_driver)->_shutdown_cb();
+		return static_cast<JackDriver*>(jack_driver)->_shutdown_cb();
 	}
 	inline static int process_cb(jack_nframes_t nframes, void* const jack_driver) {
-		return ((JackDriver*)jack_driver)->_process_cb(nframes);
+		return static_cast<JackDriver*>(jack_driver)->_process_cb(nframes);
 	}
 	inline static int block_length_cb(jack_nframes_t nframes, void* const jack_driver) {
-		return ((JackDriver*)jack_driver)->_block_length_cb(nframes);
+		return static_cast<JackDriver*>(jack_driver)->_block_length_cb(nframes);
 	}
-#ifdef INGEN_JACK_SESSION
-	inline static void session_cb(jack_session_event_t* event, void* jack_driver) {
-		((JackDriver*)jack_driver)->_session_cb(event);
-	}
-#endif
 
-	void pre_process_port(RunContext& context, EnginePort* port);
-	void post_process_port(RunContext& context, EnginePort* port);
+	void pre_process_port(RunContext& ctx, EnginePort* port);
+	void post_process_port(RunContext& ctx, EnginePort* port) const;
 
 	void port_property_internal(const jack_port_t* jport,
 	                            const URI&         uri,
 	                            const Atom&        value);
 
 	// Non static callbacks (methods)
-	void _thread_init_cb();
 	void _shutdown_cb();
 	int  _process_cb(jack_nframes_t nframes);
 	int  _block_length_cb(jack_nframes_t nframes);
-#ifdef INGEN_JACK_SESSION
-	void _session_cb(jack_session_event_t* event);
-#endif
 
 protected:
 	using Ports = boost::intrusive::slist<EnginePort,
 	                                      boost::intrusive::cache_last<true>>;
 
-	using AudioBufPtr = UPtr<float, FreeDeleter<float>>;
+	using AudioBufPtr = std::unique_ptr<float, FreeDeleter<float>>;
 
 	Engine&                _engine;
 	Ports                  _ports;
 	AudioBufPtr            _fallback_buffer;
 	LV2_Atom_Forge         _forge;
-	Raul::Semaphore        _sem;
+	raul::Semaphore        _sem;
 	std::atomic<bool>      _flag;
 	jack_client_t*         _client;
 	jack_nframes_t         _block_length;
@@ -161,7 +164,7 @@ protected:
 	bool                   _is_activated;
 	jack_position_t        _position;
 	jack_transport_state_t _transport_state;
-	float                  _old_bpm;
+	double                 _old_bpm;
 	jack_nframes_t         _old_frame;
 	bool                   _old_rolling;
 };

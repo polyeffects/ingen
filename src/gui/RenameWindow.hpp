@@ -19,15 +19,27 @@
 
 #include "Window.hpp"
 
-#include "ingen/client/ObjectModel.hpp"
-#include "ingen/types.hpp"
+#include <gtkmm/window.h>
 
-#include <gtkmm/builder.h>
-#include <gtkmm/button.h>
-#include <gtkmm/entry.h>
-#include <gtkmm/label.h>
+#include <memory>
+
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+class Button;
+class Entry;
+class Label;
+} // namespace Gtk
 
 namespace ingen {
+
+namespace client {
+class ObjectModel;
+} // namespace client
+
 namespace gui {
 
 /** Rename window.  Handles renaming of any (Ingen) object.
@@ -40,16 +52,16 @@ public:
 	RenameWindow(BaseObjectType*                   cobject,
 	             const Glib::RefPtr<Gtk::Builder>& xml);
 
-	void present(SPtr<const client::ObjectModel> object);
+	void present(const std::shared_ptr<const client::ObjectModel>& object);
 
 private:
-	void set_object(SPtr<const client::ObjectModel> object);
+	void set_object(const std::shared_ptr<const client::ObjectModel>& object);
 
 	void values_changed();
 	void cancel_clicked();
 	void ok_clicked();
 
-	SPtr<const client::ObjectModel> _object;
+	std::shared_ptr<const client::ObjectModel> _object;
 
 	Gtk::Entry*  _symbol_entry;
 	Gtk::Entry*  _label_entry;

@@ -20,7 +20,6 @@
 #include "lv2/atom/forge.h"
 #include "lv2/urid/urid.h"
 
-#include <memory>
 #include <sstream>
 
 namespace ingen {
@@ -29,7 +28,7 @@ Forge::Forge(URIMap& map)
 	: LV2_Atom_Forge()
 	, _map(map)
 {
-	lv2_atom_forge_init(this, &map.urid_map_feature()->urid_map);
+	lv2_atom_forge_init(this, &map.urid_map());
 }
 
 Atom

@@ -15,6 +15,7 @@
 */
 
 #include "Buffer.hpp"
+#include "BufferFactory.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "InputPort.hpp"
@@ -22,25 +23,35 @@
 #include "LV2Plugin.hpp"
 #include "OutputPort.hpp"
 #include "PortImpl.hpp"
+#include "PortType.hpp"
 #include "RunContext.hpp"
 #include "Worker.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/FilePath.hpp"
 #include "ingen/Forge.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/Resource.hpp"
 #include "ingen/URI.hpp"
 #include "ingen/URIMap.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "lv2/core/lv2.h"
 #include "lv2/options/options.h"
 #include "lv2/state/state.h"
+#include "lv2/urid/urid.h"
+#include "lv2/worker/worker.h"
 #include "raul/Array.hpp"
 #include "raul/Maid.hpp"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -53,7 +64,7 @@ namespace server {
  * (It _will_ crash!)
  */
 LV2Block::LV2Block(LV2Plugin*          plugin,
-                   const Raul::Symbol& symbol,
+                   const raul::Symbol& symbol,
                    bool                polyphonic,
                    GraphImpl*          parent,
                    SampleRate          srate)
@@ -75,7 +86,7 @@ LV2Block::~LV2Block()
 	drop_instances(_prepared_instances);
 }
 
-SPtr<LV2Block::Instance>
+std::shared_ptr<LV2Block::Instance>
 LV2Block::make_instance(URIs&      uris,
                         SampleRate rate,
                         uint32_t   voice,
@@ -89,13 +100,13 @@ LV2Block::make_instance(URIs&      uris,
 	if (!inst) {
 		engine.log().error("Failed to instantiate <%1%>\n",
 		                   _lv2_plugin->uri().c_str());
-		return SPtr<Instance>();
+		return nullptr;
 	}
 
 	const LV2_Options_Interface* options_iface = nullptr;
 	if (lilv_plugin_has_extension_data(lplug, uris.opt_interface)) {
-		options_iface = (const LV2_Options_Interface*)
-			lilv_instance_get_extension_data(inst, LV2_OPTIONS__interface);
+		options_iface = static_cast<const LV2_Options_Interface*>(
+			lilv_instance_get_extension_data(inst, LV2_OPTIONS__interface));
 	}
 
 	for (uint32_t p = 0; p < num_ports(); ++p) {
@@ -137,7 +148,7 @@ LV2Block::make_instance(URIs&      uris,
 
 				options_iface->get(inst->lv2_handle, options);
 				if (options[0].value) {
-					LV2_URID type = *(const LV2_URID*)options[0].value;
+					LV2_URID type = *static_cast<const LV2_URID*>(options[0].value);
 					if (type == _uris.lv2_ControlPort) {
 						port->set_type(PortType::CONTROL, 0);
 					} else if (type == _uris.lv2_CVPort) {
@@ -147,7 +158,7 @@ LV2Block::make_instance(URIs&      uris,
 							"%1% auto-morphed to unknown type %2%\n",
 							port->path().c_str(),
 							type);
-						return SPtr<Instance>();
+						return nullptr;
 					}
 				} else {
 					parent_graph()->engine().log().error(
@@ -177,9 +188,9 @@ LV2Block::prepare_poly(BufferFactory& bufs, uint32_t poly)
 	const SampleRate rate = bufs.engine().sample_rate();
 	assert(!_prepared_instances);
 	_prepared_instances = bufs.maid().make_managed<Instances>(
-		poly, *_instances, SPtr<Instance>());
+		poly, *_instances, nullptr);
 	for (uint32_t i = _polyphony; i < _prepared_instances->size(); ++i) {
-		SPtr<Instance> inst = make_instance(bufs.uris(), rate, i, true);
+		auto inst = make_instance(bufs.uris(), rate, i, true);
 		if (!inst) {
 			_prepared_instances.reset();
 			return false;
@@ -196,7 +207,7 @@ LV2Block::prepare_poly(BufferFactory& bufs, uint32_t poly)
 }
 
 bool
-LV2Block::apply_poly(RunContext& context, uint32_t poly)
+LV2Block::apply_poly(RunContext& ctx, uint32_t poly)
 {
 	if (!_polyphonic) {
 		poly = 1;
@@ -207,7 +218,7 @@ LV2Block::apply_poly(RunContext& context, uint32_t poly)
 	}
 	assert(poly <= _instances->size());
 
-	return BlockImpl::apply_poly(context, poly);
+	return BlockImpl::apply_poly(ctx, poly);
 }
 
 /** Instantiate self from LV2 plugin descriptor.
@@ -246,7 +257,7 @@ LV2Block::instantiate(BufferFactory& bufs, const LilvState* state)
 
 		/* LV2 port symbols are guaranteed to be unique, valid C identifiers,
 		   and Lilv guarantees that lilv_port_get_symbol() is valid. */
-		const Raul::Symbol port_sym(
+		const raul::Symbol port_sym(
 			lilv_node_as_string(lilv_port_get_symbol(plug, id)));
 
 		// Get port type
@@ -405,10 +416,10 @@ LV2Block::instantiate(BufferFactory& bufs, const LilvState* state)
 		for (int p = 0; preds[p]; ++p) {
 			LilvNodes* values = lilv_port_get_value(plug, id, preds[p]);
 			LILV_FOREACH(nodes, v, values) {
-				const LilvNode* val = lilv_nodes_get(values, v);
-				if (lilv_node_is_uri(val)) {
+				const LilvNode* value = lilv_nodes_get(values, v);
+				if (lilv_node_is_uri(value)) {
 					port->add_property(URI(lilv_node_as_uri(preds[p])),
-					                   forge.make_urid(URI(lilv_node_as_uri(val))));
+					                   forge.make_urid(URI(lilv_node_as_uri(value))));
 				}
 			}
 			lilv_nodes_free(values);
@@ -435,7 +446,7 @@ LV2Block::instantiate(BufferFactory& bufs, const LilvState* state)
 	// Actually create plugin instances and port buffers.
 	const SampleRate rate = bufs.engine().sample_rate();
 	_instances = bufs.maid().make_managed<Instances>(
-		_polyphony, SPtr<Instance>());
+		_polyphony, nullptr);
 	for (uint32_t i = 0; i < _polyphony; ++i) {
 		_instances->at(i) = make_instance(bufs.uris(), rate, i, false);
 		if (!_instances->at(i)) {
@@ -444,9 +455,10 @@ LV2Block::instantiate(BufferFactory& bufs, const LilvState* state)
 	}
 
 	// Load initial state if no state is explicitly given
-	LilvState* default_state = nullptr;
+	StatePtr default_state{};
 	if (!state) {
-		state = default_state = load_preset(_lv2_plugin->uri());
+		default_state = load_preset(_lv2_plugin->uri());
+		state         = default_state.get();
 	}
 
 	// Apply state
@@ -454,15 +466,11 @@ LV2Block::instantiate(BufferFactory& bufs, const LilvState* state)
 		apply_state(nullptr, state);
 	}
 
-	if (default_state) {
-		lilv_state_free(default_state);
-	}
-
 	// FIXME: Polyphony + worker?
 	if (lilv_plugin_has_feature(plug, uris.work_schedule)) {
-		_worker_iface = (const LV2_Worker_Interface*)
+		_worker_iface = static_cast<const LV2_Worker_Interface*>(
 			lilv_instance_get_extension_data(instance(0),
-			                                 LV2_WORKER__interface);
+			                                 LV2_WORKER__interface));
 	}
 
 	return ret;
@@ -474,48 +482,60 @@ LV2Block::save_state(const FilePath& dir) const
 	World&     world  = _lv2_plugin->world();
 	LilvWorld* lworld = world.lilv_world();
 
-	LilvState* state = lilv_state_new_from_instance(
-		_lv2_plugin->lilv_plugin(), const_cast<LV2Block*>(this)->instance(0),
-		&world.uri_map().urid_map_feature()->urid_map,
-		nullptr, dir.c_str(), dir.c_str(), dir.c_str(), nullptr, nullptr,
-		LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, nullptr);
+	StatePtr state{
+	    lilv_state_new_from_instance(_lv2_plugin->lilv_plugin(),
+	                                 const_cast<LV2Block*>(this)->instance(0),
+	                                 &world.uri_map().urid_map(),
+	                                 nullptr,
+	                                 dir.c_str(),
+	                                 dir.c_str(),
+	                                 dir.c_str(),
+	                                 nullptr,
+	                                 nullptr,
+	                                 LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE,
+	                                 nullptr)};
 
 	if (!state) {
 		return false;
-	} else if (lilv_state_get_num_properties(state) == 0) {
-		lilv_state_free(state);
+	} else if (lilv_state_get_num_properties(state.get()) == 0) {
 		return false;
 	}
 
 	lilv_state_save(lworld,
-	                &world.uri_map().urid_map_feature()->urid_map,
-	                &world.uri_map().urid_unmap_feature()->urid_unmap,
-	                state,
+	                &world.uri_map().urid_map(),
+	                &world.uri_map().urid_unmap(),
+	                state.get(),
 	                nullptr,
 	                dir.c_str(),
 	                "state.ttl");
-
-	lilv_state_free(state);
 
 	return true;
 }
 
 BlockImpl*
 LV2Block::duplicate(Engine&             engine,
-                    const Raul::Symbol& symbol,
+                    const raul::Symbol& symbol,
                     GraphImpl*          parent)
 {
 	const SampleRate rate = engine.sample_rate();
 
 	// Get current state
-	LilvState* state = lilv_state_new_from_instance(
-		_lv2_plugin->lilv_plugin(), instance(0),
-		&engine.world().uri_map().urid_map_feature()->urid_map,
-		nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, LV2_STATE_IS_NATIVE, nullptr);
+	StatePtr state{
+	    lilv_state_new_from_instance(_lv2_plugin->lilv_plugin(),
+	                                 instance(0),
+	                                 &engine.world().uri_map().urid_map(),
+	                                 nullptr,
+	                                 nullptr,
+	                                 nullptr,
+	                                 nullptr,
+	                                 nullptr,
+	                                 nullptr,
+	                                 LV2_STATE_IS_NATIVE,
+	                                 nullptr)};
 
 	// Duplicate and instantiate block
 	auto* dup = new LV2Block(_lv2_plugin, symbol, _polyphonic, parent, rate);
-	if (!dup->instantiate(*engine.buffer_factory(), state)) {
+	if (!dup->instantiate(*engine.buffer_factory(), state.get())) {
 		delete dup;
 		return nullptr;
 	}
@@ -558,7 +578,7 @@ LV2Block::work_respond(LV2_Worker_Respond_Handle handle,
                        uint32_t                  size,
                        const void*               data)
 {
-	auto* block = (LV2Block*)handle;
+	auto* block = static_cast<LV2Block*>(handle);
 	auto* r     = new LV2Block::Response(size, data);
 	block->_responses.push_back(*r);
 	return LV2_WORKER_SUCCESS;
@@ -582,15 +602,15 @@ LV2Block::work(uint32_t size, const void* data)
 }
 
 void
-LV2Block::run(RunContext& context)
+LV2Block::run(RunContext& ctx)
 {
 	for (uint32_t i = 0; i < _polyphony; ++i) {
-		lilv_instance_run(instance(i), context.nframes());
+		lilv_instance_run(instance(i), ctx.nframes());
 	}
 }
 
 void
-LV2Block::post_process(RunContext& context)
+LV2Block::post_process(RunContext& ctx)
 {
 	/* Handle any worker responses.  Note that this may write to output ports,
 	   so must be done first to prevent clobbering worker responses and
@@ -601,7 +621,7 @@ LV2Block::post_process(RunContext& context)
 			Response& r = _responses.front();
 			_worker_iface->work_response(inst, r.size, r.data);
 			_responses.pop_front();
-			context.engine().maid()->dispose(&r);
+			ctx.engine().maid()->dispose(&r);
 		}
 
 		if (_worker_iface->end_run) {
@@ -610,10 +630,10 @@ LV2Block::post_process(RunContext& context)
 	}
 
 	/* Run cycle truly finished, finalise output ports. */
-	BlockImpl::post_process(context);
+	BlockImpl::post_process(ctx);
 }
 
-LilvState*
+StatePtr
 LV2Block::load_preset(const URI& uri)
 {
 	World&     world  = _lv2_plugin->world();
@@ -624,35 +644,33 @@ LV2Block::load_preset(const URI& uri)
 	lilv_world_load_resource(lworld, preset);
 
 	// Load preset from world
-	LV2_URID_Map* map   = &world.uri_map().urid_map_feature()->urid_map;
-	LilvState*    state = lilv_state_new_from_world(lworld, map, preset);
+	LV2_URID_Map* map = &world.uri_map().urid_map();
+	StatePtr      state{lilv_state_new_from_world(lworld, map, preset)};
 
 	lilv_node_free(preset);
 	return state;
 }
 
-LilvState*
+StatePtr
 LV2Block::load_state(World& world, const FilePath& path)
 {
 	LilvWorld* lworld  = world.lilv_world();
 	const URI  uri     = URI(path);
 	LilvNode*  subject = lilv_new_uri(lworld, uri.c_str());
 
-	LilvState* state = lilv_state_new_from_file(
-		lworld,
-		&world.uri_map().urid_map_feature()->urid_map,
-		subject,
-		path.c_str());
+	StatePtr state{lilv_state_new_from_file(
+	    lworld, &world.uri_map().urid_map(), subject, path.c_str())};
 
 	lilv_node_free(subject);
 	return state;
 }
 
 void
-LV2Block::apply_state(const UPtr<Worker>& worker, const LilvState* state)
+LV2Block::apply_state(const std::unique_ptr<Worker>& worker,
+                      const LilvState*               state)
 {
-	World&            world = parent_graph()->engine().world();
-	SPtr<LV2_Feature> sched;
+	World&                       world = parent_graph()->engine().world();
+	std::shared_ptr<LV2_Feature> sched;
 	if (worker) {
 		sched = worker->schedule_feature()->feature(world, this);
 	}
@@ -673,7 +691,7 @@ get_port_value(const char* port_symbol,
                uint32_t*   size,
                uint32_t*   type)
 {
-	auto* const block = (LV2Block*)user_data;
+	auto* const block = static_cast<LV2Block*>(user_data);
 	auto* const port  = block->port_by_symbol(port_symbol);
 
 	if (port && port->is_input() && port->value().is_valid()) {
@@ -691,34 +709,40 @@ LV2Block::save_preset(const URI&        uri,
 {
 	World&          world  = parent_graph()->engine().world();
 	LilvWorld*      lworld = world.lilv_world();
-	LV2_URID_Map*   lmap   = &world.uri_map().urid_map_feature()->urid_map;
-	LV2_URID_Unmap* lunmap = &world.uri_map().urid_unmap_feature()->urid_unmap;
+	LV2_URID_Map*   lmap   = &world.uri_map().urid_map();
+	LV2_URID_Unmap* lunmap = &world.uri_map().urid_unmap();
 
 	const FilePath path     = FilePath(uri.path());
 	const FilePath dirname  = path.parent_path();
 	const FilePath basename = path.stem();
 
-	LilvState* state = lilv_state_new_from_instance(
-		_lv2_plugin->lilv_plugin(), instance(0), lmap,
-		nullptr, nullptr, nullptr, path.c_str(),
-		get_port_value, this, LV2_STATE_IS_NATIVE, nullptr);
+	StatePtr state{lilv_state_new_from_instance(_lv2_plugin->lilv_plugin(),
+	                                            instance(0),
+	                                            lmap,
+	                                            nullptr,
+	                                            nullptr,
+	                                            nullptr,
+	                                            path.c_str(),
+	                                            get_port_value,
+	                                            this,
+	                                            LV2_STATE_IS_NATIVE,
+	                                            nullptr)};
 
 	if (state) {
 		const Properties::const_iterator l = props.find(_uris.rdfs_label);
 		if (l != props.end() && l->second.type() == _uris.atom_String) {
-			lilv_state_set_label(state, l->second.ptr<char>());
+			lilv_state_set_label(state.get(), l->second.ptr<char>());
 		}
 
-		lilv_state_save(lworld, lmap, lunmap, state, nullptr,
+		lilv_state_save(lworld, lmap, lunmap, state.get(), nullptr,
 		                dirname.c_str(), basename.c_str());
 
-		const URI         uri(lilv_node_as_uri(lilv_state_get_uri(state)));
-		const std::string label(lilv_state_get_label(state)
-		                        ? lilv_state_get_label(state)
-		                        : basename);
-		lilv_state_free(state);
+		const URI state_uri(lilv_node_as_uri(lilv_state_get_uri(state.get())));
+		const std::string label(lilv_state_get_label(state.get())
+		                            ? lilv_state_get_label(state.get())
+		                            : basename);
 
-		Resource preset(_uris, uri);
+		Resource preset(_uris, state_uri);
 		preset.set_property(_uris.rdf_type, _uris.pset_Preset);
 		preset.set_property(_uris.rdfs_label, world.forge().alloc(label));
 		preset.set_property(_uris.lv2_appliesTo,
@@ -729,7 +753,7 @@ LV2Block::save_preset(const URI&        uri,
 		lilv_world_load_bundle(lworld, lbundle);
 		lilv_node_free(lbundle);
 
-		return preset;
+		return {preset};
 	}
 
 	return boost::optional<Resource>();

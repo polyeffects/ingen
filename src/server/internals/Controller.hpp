@@ -18,15 +18,26 @@
 #define INGEN_INTERNALS_CONTROLLER_HPP
 
 #include "InternalBlock.hpp"
+#include "types.hpp"
 
 #include <cstdint>
 
+namespace raul {
+class Symbol;
+} // namespace raul
+
 namespace ingen {
+
+class URIs;
+
 namespace server {
 
+class BufferFactory;
+class GraphImpl;
 class InputPort;
-class OutputPort;
 class InternalPlugin;
+class OutputPort;
+class RunContext;
 
 namespace internals {
 
@@ -42,14 +53,14 @@ class ControllerNode : public InternalBlock
 public:
 	ControllerNode(InternalPlugin*      plugin,
 	               BufferFactory&       bufs,
-	               const Raul::Symbol&  symbol,
+	               const raul::Symbol&  symbol,
 	               bool                 polyphonic,
 	               GraphImpl*           parent,
 	               SampleRate           srate);
 
-	void run(RunContext& context) override;
+	void run(RunContext& ctx) override;
 
-	bool control(RunContext& context, uint8_t control_num, uint8_t val, FrameTime time);
+	bool control(RunContext& ctx, uint8_t control_num, uint8_t val, FrameTime time);
 
 	void learn() override { _learning = true; }
 
@@ -66,8 +77,8 @@ private:
 	bool        _learning;
 };
 
+} // namespace internals
 } // namespace server
 } // namespace ingen
-} // namespace internals
 
 #endif // INGEN_INTERNALS_CONTROLLER_HPP

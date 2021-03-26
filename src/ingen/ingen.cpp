@@ -14,35 +14,42 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
 #include "ingen/EngineBase.hpp"
+#include "ingen/FilePath.hpp"
 #include "ingen/Interface.hpp"
-#include "ingen/Log.hpp"
+#include "ingen/Message.hpp"
 #include "ingen/Parser.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/World.hpp"
+#include "ingen/fmt.hpp"
 #include "ingen/paths.hpp"
 #include "ingen/runtime_paths.hpp"
-#include "ingen/types.hpp"
 #include "ingen_config.h"
 #include "raul/Path.hpp"
 #include "raul/Symbol.hpp"
+#include "serd/serd.h"
 
 #ifdef HAVE_SOCKET
 #include "ingen/client/SocketClient.hpp"
 #endif
 
+#include <boost/optional/optional.hpp>
+
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <signal.h>
 #include <string>
 #include <thread>
 
-using namespace std;
-using namespace ingen;
+namespace ingen {
+namespace {
 
 class DummyInterface : public Interface
 {
@@ -50,64 +57,62 @@ class DummyInterface : public Interface
 	void message(const Message& msg) override {}
 };
 
-unique_ptr<World> world;
+std::unique_ptr<World> world;
 
-static void
+void
 ingen_interrupt(int signal)
 {
 	if (signal == SIGTERM) {
-		cerr << "ingen: Terminated" << endl;
+		std::cerr << "ingen: Terminated\n";
 		exit(EXIT_FAILURE);
 	} else {
-		cout << "ingen: Interrupted" << endl;
+		std::cout << "ingen: Interrupted\n";
 		if (world && world->engine()) {
 			world->engine()->quit();
 		}
 	}
 }
 
-static void
+void
 ingen_try(bool cond, const char* msg)
 {
 	if (!cond) {
-		cerr << "ingen: error: " << msg << endl;
+		std::cerr << "ingen: error: " << msg << "\n";
 		exit(EXIT_FAILURE);
 	}
 }
 
-static int
+int
 print_version()
 {
-	cout << "ingen " << INGEN_VERSION
-	     << " <http://drobilla.net/software/ingen>\n"
-	     << "Copyright 2007-2017 David Robillard <http://drobilla.net>.\n"
-	     << "License: <https://www.gnu.org/licenses/agpl-3.0>\n"
-	     << "This is free software; you are free to change and redistribute it.\n"
-	     << "There is NO WARRANTY, to the extent permitted by law." << endl;
+	std::cout << "ingen " << INGEN_VERSION
+	          << " <http://drobilla.net/software/ingen>\n"
+	          << "Copyright 2007-2020 David Robillard <http://drobilla.net>.\n"
+	          << "License: <https://www.gnu.org/licenses/agpl-3.0>\n"
+	          << "This is free software; you are free to change and redistribute it.\n"
+	          << "There is NO WARRANTY, to the extent permitted by law.\n";
 	return EXIT_SUCCESS;
 }
 
 int
-main(int argc, char** argv)
+run(int argc, char** argv)
 {
-	ingen::set_bundle_path_from_code((void*)&print_version);
-
 	// Create world
 	try {
-		world = unique_ptr<ingen::World>(
+		world = std::unique_ptr<ingen::World>(
 			new ingen::World(nullptr, nullptr, nullptr));
 		world->load_configuration(argc, argv);
 		if (argc <= 1) {
-			world->conf().print_usage("ingen", cout);
+			world->conf().print_usage("ingen", std::cout);
 			return EXIT_FAILURE;
 		} else if (world->conf().option("help").get<int32_t>()) {
-			world->conf().print_usage("ingen", cout);
+			world->conf().print_usage("ingen", std::cout);
 			return EXIT_SUCCESS;
 		} else if (world->conf().option("version").get<int32_t>()) {
 			return print_version();
 		}
 	} catch (std::exception& e) {
-		cout << "ingen: error: " << e.what() << endl;
+		std::cout << "ingen: error: " << e.what() << "\n";
 		return EXIT_FAILURE;
 	}
 
@@ -119,7 +124,7 @@ main(int argc, char** argv)
 	// Run engine
 	if (conf.option("engine").get<int32_t>()) {
 		if (world->conf().option("threads").get<int32_t>() < 1) {
-			cerr << "ingen: error: threads must be > 0" << endl;
+			std::cerr << "ingen: error: threads must be > 0\n";
 			return EXIT_FAILURE;
 		}
 
@@ -140,8 +145,8 @@ main(int argc, char** argv)
 	}
 
 	// If we don't have a local engine interface (from the GUI), use network
-	SPtr<Interface> engine_interface(world->interface());
-	SPtr<Interface> dummy_client(new DummyInterface());
+	auto engine_interface = world->interface();
+	auto dummy_client     = std::make_shared<DummyInterface>();
 	if (!engine_interface) {
 		const char* const uri = conf.option("connect").ptr<char>();
 		ingen_try(URI::is_valid(uri),
@@ -149,7 +154,7 @@ main(int argc, char** argv)
 		engine_interface = world->new_interface(URI(uri), dummy_client);
 
 		if (!engine_interface && !conf.option("gui").get<int32_t>()) {
-			cerr << fmt("ingen: error: Failed to connect to `%1%'\n", uri);
+			std::cerr << fmt("ingen: error: Failed to connect to `%1%'\n", uri);
 			return EXIT_FAILURE;
 		}
 
@@ -159,38 +164,39 @@ main(int argc, char** argv)
 	// Activate the engine, if we have one
 	if (world->engine()) {
 		if (!world->load_module("jack") && !world->load_module("portaudio")) {
-			cerr << "ingen: error: Failed to load driver module" << endl;
+			std::cerr << "ingen: error: Failed to load driver module\n";
 			return EXIT_FAILURE;
 		}
 
 		if (!world->engine()->supports_dynamic_ports() &&
 		    !conf.option("load").is_valid()) {
-			cerr << "ingen: error: Initial graph required for driver" << endl;
+			std::cerr << "ingen: error: Initial graph required for driver\n";
 			return EXIT_FAILURE;
 		}
 	}
 
 	// Load a graph
 	if (conf.option("load").is_valid()) {
-		boost::optional<Raul::Path>   parent;
-		boost::optional<Raul::Symbol> symbol;
+		boost::optional<raul::Path>   parent;
+		boost::optional<raul::Symbol> symbol;
 
 		const Atom& path_option = conf.option("path");
 		if (path_option.is_valid()) {
-			if (Raul::Path::is_valid(path_option.ptr<char>())) {
-				const Raul::Path p(path_option.ptr<char>());
+			if (raul::Path::is_valid(path_option.ptr<char>())) {
+				const raul::Path p(path_option.ptr<char>());
 				if (!p.is_root()) {
 					parent = p.parent();
-					symbol = Raul::Symbol(p.symbol());
+					symbol = raul::Symbol(p.symbol());
 				}
 			} else {
-				cerr << "Invalid path given: '" << path_option.ptr<char>() << endl;
+				std::cerr << "Invalid path given: '" << path_option.ptr<char>()
+				          << "\n";
 			}
 		}
 
 		ingen_try(bool(world->parser()), "Failed to create parser");
 
-		const string graph = conf.option("load").ptr<char>();
+		const std::string graph = conf.option("load").ptr<char>();
 
 		engine_interface->get(URI("ingen:/plugins"));
 		engine_interface->get(main_uri());
@@ -200,15 +206,16 @@ main(int argc, char** argv)
 			*world, *engine_interface, graph, parent, symbol);
 	} else if (conf.option("server-load").is_valid()) {
 		const char* path = conf.option("server-load").ptr<char>();
-		if (serd_uri_string_has_scheme((const uint8_t*)path)) {
-			std::cout << "Loading " << path << " (server side)" << std::endl;
+		if (serd_uri_string_has_scheme(reinterpret_cast<const uint8_t*>(path))) {
+			std::cout << "Loading " << path << " (server side)" << "\n";
 			engine_interface->copy(URI(path), main_uri());
 		} else {
 			SerdNode uri = serd_node_new_file_uri(
-				(const uint8_t*)path, nullptr, nullptr, true);
-			std::cout << "Loading " << (const char*)uri.buf
-			          << " (server side)" << std::endl;
-			engine_interface->copy(URI((const char*)uri.buf), main_uri());
+				reinterpret_cast<const uint8_t*>(path), nullptr, nullptr, true);
+			std::cout << "Loading " << reinterpret_cast<const char*>(uri.buf)
+			          << " (server side)\n";
+			engine_interface->copy(URI(reinterpret_cast<const char*>(uri.buf)),
+			                       main_uri());
 			serd_node_free(&uri);
 		}
 	}
@@ -216,14 +223,15 @@ main(int argc, char** argv)
 	// Save the currently loaded graph
 	if (conf.option("save").is_valid()) {
 		const char* path = conf.option("save").ptr<char>();
-		if (serd_uri_string_has_scheme((const uint8_t*)path)) {
-			std::cout << "Saving to " << path << std::endl;
+		if (serd_uri_string_has_scheme(reinterpret_cast<const uint8_t*>(path))) {
+			std::cout << "Saving to " << path << "\n";
 			engine_interface->copy(main_uri(), URI(path));
 		} else {
 			SerdNode uri = serd_node_new_file_uri(
-				(const uint8_t*)path, nullptr, nullptr, true);
-			std::cout << "Saving to " << (const char*)uri.buf << std::endl;
-			engine_interface->copy(main_uri(), URI((const char*)uri.buf));
+				reinterpret_cast<const uint8_t*>(path), nullptr, nullptr, true);
+			std::cout << "Saving to " << reinterpret_cast<const char*>(uri.buf)
+			          << "\n";
+			engine_interface->copy(main_uri(), URI(reinterpret_cast<const char*>(uri.buf)));
 			serd_node_free(&uri);
 		}
 	}
@@ -243,12 +251,12 @@ main(int argc, char** argv)
 	} else if (world->engine()) {
 		// Run engine main loop until interrupt
 		while (world->engine()->main_iteration()) {
-			this_thread::sleep_for(chrono::milliseconds(125));
+			std::this_thread::sleep_for(std::chrono::milliseconds(125));
 		}
 	}
 
 	// Sleep for a half second to allow event queues to drain
-	this_thread::sleep_for(chrono::milliseconds(500));
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
 	// Shut down
 	if (world->engine()) {
@@ -263,4 +271,16 @@ main(int argc, char** argv)
 	engine_interface.reset();
 
 	return 0;
+}
+
+} // namespace
+} // namespace ingen
+
+int
+main(int argc, char** argv)
+{
+	ingen::set_bundle_path_from_code(
+		reinterpret_cast<void (*)()>(&ingen::run));
+
+	return ingen::run(argc, argv);
 }

@@ -17,19 +17,29 @@
 #include "ObjectMenu.hpp"
 
 #include "App.hpp"
-#include "WidgetFactory.hpp"
 #include "WindowFactory.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/ObjectModel.hpp"
 
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/checkmenuitem.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/separatormenuitem.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
+
 #include <cstdint>
+#include <memory>
 
 namespace ingen {
-
-using namespace client;
-
 namespace gui {
 
 ObjectMenu::ObjectMenu(BaseObjectType*                   cobject,
@@ -54,7 +64,8 @@ ObjectMenu::ObjectMenu(BaseObjectType*                   cobject,
 }
 
 void
-ObjectMenu::init(App& app, SPtr<const ObjectModel> object)
+ObjectMenu::init(App&                                              app,
+                 const std::shared_ptr<const client::ObjectModel>& object)
 {
 	_app = &app;
 	_object = object;
@@ -96,7 +107,7 @@ ObjectMenu::on_menu_learn()
 {
 	_app->interface()->set_property(_object->uri(),
 	                                _app->uris().midi_binding,
-	                                _app->uris().patch_wildcard.urid);
+	                                _app->uris().patch_wildcard.urid_atom());
 }
 
 void

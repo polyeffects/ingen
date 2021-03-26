@@ -15,18 +15,15 @@
 */
 
 #include "TestClient.hpp"
-#include "ingen_config.h"
 
 #include "ingen/Atom.hpp"
 #include "ingen/AtomForge.hpp"
 #include "ingen/AtomReader.hpp"
-#include "ingen/AtomWriter.hpp"
 #include "ingen/Configuration.hpp"
 #include "ingen/EngineBase.hpp"
 #include "ingen/FilePath.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Parser.hpp"
-#include "ingen/Properties.hpp"
 #include "ingen/Serialiser.hpp"
 #include "ingen/Store.hpp"
 #include "ingen/URI.hpp"
@@ -34,8 +31,8 @@
 #include "ingen/World.hpp"
 #include "ingen/filesystem.hpp"
 #include "ingen/fmt.hpp"
+#include "ingen/memory.hpp"
 #include "ingen/runtime_paths.hpp"
-#include "ingen/types.hpp"
 #include "raul/Path.hpp"
 #include "serd/serd.h"
 #include "sord/sordmm.hpp"
@@ -44,44 +41,47 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
-using namespace std;
-using namespace ingen;
+namespace ingen {
+namespace test {
+namespace {
 
-unique_ptr<World> world;
+std::unique_ptr<World> world;
 
-static void
+void
 ingen_try(bool cond, const char* msg)
 {
 	if (!cond) {
-		cerr << "ingen: Error: " << msg << endl;
+		std::cerr << "ingen: Error: " << msg << std::endl;
 		world.reset();
 		exit(EXIT_FAILURE);
 	}
 }
 
-static FilePath
+FilePath
 real_file_path(const char* path)
 {
-	UPtr<char, FreeDeleter<char>> real_path{realpath(path, nullptr)};
+	std::unique_ptr<char, FreeDeleter<char>> real_path{realpath(path, nullptr),
+	                                                   FreeDeleter<char>{}};
 
 	return FilePath{real_path.get()};
 }
 
 int
-main(int argc, char** argv)
+run(int argc, char** argv)
 {
-	set_bundle_path_from_code((void*)&ingen_try);
-
 	// Create world
 	try {
-		world = unique_ptr<World>{new World(nullptr, nullptr, nullptr)};
+		world = std::unique_ptr<World>{new World(nullptr, nullptr, nullptr)};
 		world->load_configuration(argc, argv);
 	} catch (std::exception& e) {
-		cout << "ingen: " << e.what() << endl;
+		std::cout << "ingen: " << e.what() << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -89,19 +89,26 @@ main(int argc, char** argv)
 	const Atom& load    = world->conf().option("load");
 	const Atom& execute = world->conf().option("execute");
 	if (!load.is_valid() || !execute.is_valid()) {
-		cerr << "Usage: ingen_test --load START_GRAPH --execute COMMANDS_FILE" << endl;
+		std::cerr
+		    << "Usage: ingen_test --load START_GRAPH --execute COMMANDS_FILE"
+		    << std::endl;
+
 		return EXIT_FAILURE;
 	}
 
 	// Get start graph and commands file options
-	const FilePath load_path = real_file_path((const char*)load.get_body());
-	const FilePath run_path  = real_file_path((const char*)execute.get_body());
+	const FilePath load_path = real_file_path(static_cast<const char*>(load.get_body()));
+	const FilePath run_path  = real_file_path(static_cast<const char*>(execute.get_body()));
 
 	if (load_path.empty()) {
-		cerr << "error: initial graph '" << load_path << "' does not exist" << endl;
+		std::cerr << "error: initial graph '" << load_path << "' does not exist"
+		          << std::endl;
+
 		return EXIT_FAILURE;
 	} else if (run_path.empty()) {
-		cerr << "error: command file '" << run_path << "' does not exist" << endl;
+		std::cerr << "error: command file '" << run_path << "' does not exist"
+		          << std::endl;
+
 		return EXIT_FAILURE;
 	}
 
@@ -117,14 +124,16 @@ main(int argc, char** argv)
 
 	// Load graph
 	if (!world->parser()->parse_file(*world, *world->interface(), load_path)) {
-		cerr << "error: failed to load initial graph " << load_path << endl;
+		std::cerr << "error: failed to load initial graph " << load_path
+		          << std::endl;
+
 		return EXIT_FAILURE;
 	}
 	world->engine()->flush_events(std::chrono::milliseconds(20));
 
 	// Read commands
 
-	AtomForge forge(world->uri_map().urid_map_feature()->urid_map);
+	AtomForge forge(world->uri_map().urid_map());
 
 	sratom_set_object_mode(&forge.sratom(), SRATOM_OBJECT_MODE_BLANK_SUBJECT);
 
@@ -132,20 +141,23 @@ main(int argc, char** argv)
 	AtomReader atom_reader(world->uri_map(),
 	                       world->uris(),
 	                       world->log(),
-	                       *world->interface().get());
+	                       *world->interface());
 
 	// AtomWriter to serialise responses from the engine
-	SPtr<Interface> client(new TestClient(world->log()));
+	std::shared_ptr<Interface> client(new TestClient(world->log()));
 
 	world->interface()->set_respondee(client);
 	world->engine()->register_client(client);
 
 	SerdURI cmds_base;
 	SerdNode cmds_file_uri = serd_node_new_file_uri(
-		(const uint8_t*)run_path.c_str(),
+		reinterpret_cast<const uint8_t*>(run_path.c_str()),
 		nullptr, &cmds_base, true);
-	Sord::Model* cmds = new Sord::Model(*world->rdf_world(),
-	                                    (const char*)cmds_file_uri.buf);
+
+	auto* cmds =
+	    new Sord::Model(*world->rdf_world(),
+	                    reinterpret_cast<const char*>(cmds_file_uri.buf));
+
 	SerdEnv* env = serd_env_new(&cmds_file_uri);
 	cmds->load_file(env, SERD_TURTLE, run_path);
 	Sord::Node nil;
@@ -153,7 +165,7 @@ main(int argc, char** argv)
 	for (;; ++n_events) {
 		std::string subject_str = fmt("msg%1%", n_events);
 		Sord::URI subject(*world->rdf_world(), subject_str,
-		                  (const char*)cmds_file_uri.buf);
+		                  reinterpret_cast<const char*>(cmds_file_uri.buf));
 		Sord::Iter iter = cmds->find(subject, nil, nil);
 		if (iter.end()) {
 			break;
@@ -182,7 +194,7 @@ main(int argc, char** argv)
 	delete cmds;
 
 	// Save resulting graph
-	auto              r        = world->store()->find(Raul::Path("/"));
+	auto              r        = world->store()->find(raul::Path("/"));
 	const std::string base     = run_path.stem();
 	const std::string out_name = base.substr(0, base.find('.')) + ".out.ingen";
 	const FilePath    out_path = filesystem::current_path() / out_name;
@@ -195,7 +207,7 @@ main(int argc, char** argv)
 	}
 
 	// Save completely undone graph
-	r = world->store()->find(Raul::Path("/"));
+	r = world->store()->find(raul::Path("/"));
 	const std::string undo_name = base.substr(0, base.find('.')) + ".undo.ingen";
 	const FilePath    undo_path = filesystem::current_path() / undo_name;
 	world->serialiser()->write_bundle(r->second, URI(undo_path));
@@ -207,7 +219,7 @@ main(int argc, char** argv)
 	}
 
 	// Save completely redone graph
-	r = world->store()->find(Raul::Path("/"));
+	r = world->store()->find(raul::Path("/"));
 	const std::string redo_name = base.substr(0, base.find('.')) + ".redo.ingen";
 	const FilePath    redo_path = filesystem::current_path() / redo_name;
 	world->serialiser()->write_bundle(r->second, URI(redo_path));
@@ -219,4 +231,17 @@ main(int argc, char** argv)
 	world->engine()->deactivate();
 
 	return EXIT_SUCCESS;
+}
+
+} // namespace
+} // namespace test
+} // namespace ingen
+
+int
+main(int argc, char** argv)
+{
+	ingen::set_bundle_path_from_code(
+	    reinterpret_cast<void (*)()>(&ingen::test::ingen_try));
+
+	return ingen::test::run(argc, argv);
 }

@@ -26,34 +26,43 @@
 
 #include "ingen/Atom.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIMap.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/paths.hpp"
 #include "raul/Array.hpp"
+#include "raul/Maid.hpp"
 #include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
 #include <cassert>
+#include <map>
+#include <memory>
 #include <utility>
 
 namespace ingen {
 namespace server {
 namespace events {
 
-CreatePort::CreatePort(Engine&                engine,
-                       const SPtr<Interface>& client,
-                       int32_t                id,
-                       SampleCount            timestamp,
-                       const Raul::Path&      path,
-                       const Properties&      properties)
-	: Event(engine, client, id, timestamp)
-	, _path(path)
-	, _port_type(PortType::UNKNOWN)
-	, _buf_type(0)
-	, _graph(nullptr)
-	, _graph_port(nullptr)
-	, _engine_port(nullptr)
-	, _properties(properties)
+CreatePort::CreatePort(Engine&                           engine,
+                       const std::shared_ptr<Interface>& client,
+                       int32_t                           id,
+                       SampleCount                       timestamp,
+                       raul::Path                        path,
+                       const Properties&                 properties)
+    : Event(engine, client, id, timestamp)
+    , _path(std::move(path))
+    , _port_type(PortType::UNKNOWN)
+    , _buf_type(0)
+    , _graph(nullptr)
+    , _graph_port(nullptr)
+    , _engine_port(nullptr)
+    , _properties(properties)
 {
 	const ingen::URIs& uris = _engine.world().uris();
 
@@ -98,7 +107,7 @@ CreatePort::pre_process(PreProcessContext&)
 		return Event::pre_process_done(Status::EXISTS, _path);
 	}
 
-	const Raul::Path parent_path = _path.parent();
+	const raul::Path parent_path = _path.parent();
 	Node* const      parent      = _engine.store()->get(parent_path);
 	if (!parent) {
 		return Event::pre_process_done(Status::PARENT_NOT_FOUND, parent_path);
@@ -147,7 +156,7 @@ CreatePort::pre_process(PreProcessContext&)
 	}
 
 	// Create port
-	_graph_port = new DuplexPort(bufs, _graph, Raul::Symbol(_path.symbol()),
+	_graph_port = new DuplexPort(bufs, _graph, raul::Symbol(_path.symbol()),
 	                             index,
 	                             polyphonic,
 	                             _port_type, _buf_type, buf_size,
@@ -172,18 +181,18 @@ CreatePort::pre_process(PreProcessContext&)
 
 	_update = _graph_port->properties();
 
-	assert(_graph_port->index() == (uint32_t)index_i->second.get<int32_t>());
-	assert(_graph->num_ports_non_rt() == (uint32_t)old_n_ports + 1);
+	assert(_graph_port->index() == static_cast<uint32_t>(index_i->second.get<int32_t>()));
+	assert(_graph->num_ports_non_rt() == static_cast<uint32_t>(old_n_ports) + 1u);
 	assert(_ports_array->size() == _graph->num_ports_non_rt());
 	assert(_graph_port->index() < _ports_array->size());
 	return Event::pre_process_done(Status::SUCCESS);
 }
 
 void
-CreatePort::execute(RunContext& context)
+CreatePort::execute(RunContext& ctx)
 {
 	if (_status == Status::SUCCESS) {
-		const MPtr<GraphImpl::Ports>& old_ports = _graph->external_ports();
+		const auto& old_ports = _graph->external_ports();
 		if (old_ports) {
 			for (uint32_t i = 0; i < old_ports->size(); ++i) {
 				const auto* const old_port = (*old_ports)[i];
@@ -196,7 +205,7 @@ CreatePort::execute(RunContext& context)
 		_graph->set_external_ports(std::move(_ports_array));
 
 		if (_engine_port) {
-			_engine.driver()->add_port(context, _engine_port);
+			_engine.driver()->add_port(ctx, _engine_port);
 		}
 	}
 }

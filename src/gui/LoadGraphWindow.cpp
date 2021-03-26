@@ -17,36 +17,54 @@
 #include "LoadGraphWindow.hpp"
 
 #include "App.hpp"
-#include "GraphView.hpp"
-#include "Style.hpp"
 #include "ThreadedLoader.hpp"
 
+#include "ingen/Atom.hpp"
 #include "ingen/Configuration.hpp"
-#include "ingen/Interface.hpp"
-#include "ingen/client/BlockModel.hpp"
+#include "ingen/FilePath.hpp"
+#include "ingen/Forge.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/World.hpp"
 #include "ingen/client/ClientStore.hpp"
 #include "ingen/client/GraphModel.hpp"
 #include "ingen/runtime_paths.hpp"
+#include "raul/Path.hpp"
 
 #include <boost/optional/optional.hpp>
+#include <glibmm/fileutils.h>
 #include <glibmm/miscutils.h>
+#include <glibmm/propertyproxy.h>
+#include <glibmm/refptr.h>
+#include <glibmm/signalproxy.h>
+#include <glibmm/slisthandle.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/button.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/filefilter.h>
+#include <gtkmm/label.h>
+#include <gtkmm/radiobutton.h>
+#include <gtkmm/spinbutton.h>
+#include <gtkmm/window.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <list>
-#include <ostream>
+#include <map>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 
 namespace ingen {
 
-using namespace client;
+using client::GraphModel;
 
 namespace gui {
 
 LoadGraphWindow::LoadGraphWindow(BaseObjectType*                   cobject,
                                  const Glib::RefPtr<Gtk::Builder>& xml)
 	: Gtk::FileChooserDialog(cobject)
-	, _app(nullptr)
-	, _merge_ports(false)
 {
 	xml->get_widget("load_graph_symbol_label", _symbol_label);
 	xml->get_widget("load_graph_symbol_entry", _symbol_entry);
@@ -97,9 +115,9 @@ LoadGraphWindow::LoadGraphWindow(BaseObjectType*                   cobject,
 }
 
 void
-LoadGraphWindow::present(const SPtr<const GraphModel>& graph,
-                         bool                          import,
-                         const Properties&             data)
+LoadGraphWindow::present(const std::shared_ptr<const GraphModel>& graph,
+                         bool                                     import,
+                         const Properties&                        data)
 {
 	_import = import;
 	set_graph(graph);
@@ -117,7 +135,7 @@ LoadGraphWindow::present(const SPtr<const GraphModel>& graph,
  * This function MUST be called before using the window in any way!
  */
 void
-LoadGraphWindow::set_graph(const SPtr<const GraphModel>& graph)
+LoadGraphWindow::set_graph(const std::shared_ptr<const GraphModel>& graph)
 {
 	_graph = graph;
 	_symbol_entry->set_text("");
@@ -169,8 +187,8 @@ LoadGraphWindow::ok_clicked()
 
 	if (_import) {
 		// If unset load_graph will load value
-		boost::optional<Raul::Path>   parent;
-		boost::optional<Raul::Symbol> symbol;
+		boost::optional<raul::Path>   parent;
+		boost::optional<raul::Symbol> symbol;
 		if (!_graph->path().is_root()) {
 			parent = _graph->path().parent();
 			symbol = _graph->symbol();
@@ -181,16 +199,16 @@ LoadGraphWindow::ok_clicked()
 
 	} else {
 		std::list<Glib::ustring> uri_list = get_filenames();
-		for (auto u : uri_list) {
+		for (const auto& u : uri_list) {
 			// Cascade
 			Atom& x = _initial_data.find(uris.ingen_canvasX)->second;
 			x = _app->forge().make(x.get<float>() + 20.0f);
 			Atom& y = _initial_data.find(uris.ingen_canvasY)->second;
 			y = _app->forge().make(y.get<float>() + 20.0f);
 
-			Raul::Symbol symbol(symbol_from_filename(u));
+			raul::Symbol symbol(symbol_from_filename(u));
 			if (uri_list.size() == 1 && !_symbol_entry->get_text().empty()) {
-				symbol = Raul::Symbol::symbolify(_symbol_entry->get_text());
+				symbol = raul::Symbol::symbolify(_symbol_entry->get_text());
 			}
 
 			symbol = avoid_symbol_clash(symbol);
@@ -215,16 +233,16 @@ LoadGraphWindow::cancel_clicked()
 	hide();
 }
 
-Raul::Symbol
+raul::Symbol
 LoadGraphWindow::symbol_from_filename(const Glib::ustring& filename)
 {
 	std::string symbol_str = Glib::path_get_basename(get_filename());
 	symbol_str = symbol_str.substr(0, symbol_str.find('.'));
-	return Raul::Symbol::symbolify(symbol_str);
+	return raul::Symbol::symbolify(symbol_str);
 }
 
-Raul::Symbol
-LoadGraphWindow::avoid_symbol_clash(const Raul::Symbol& symbol)
+raul::Symbol
+LoadGraphWindow::avoid_symbol_clash(const raul::Symbol& symbol)
 {
 	unsigned offset = _app->store()->child_name_offset(
 		_graph->path(), symbol);
@@ -232,7 +250,7 @@ LoadGraphWindow::avoid_symbol_clash(const Raul::Symbol& symbol)
 	if (offset != 0) {
 		std::stringstream ss;
 		ss << symbol << "_" << offset;
-		return Raul::Symbol(ss.str());
+		return raul::Symbol(ss.str());
 	} else {
 		return symbol;
 	}

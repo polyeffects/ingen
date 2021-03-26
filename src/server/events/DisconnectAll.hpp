@@ -17,24 +17,32 @@
 #ifndef INGEN_EVENTS_DISCONNECTALL_HPP
 #define INGEN_EVENTS_DISCONNECTALL_HPP
 
-#include "CompiledGraph.hpp"
 #include "Disconnect.hpp"
 #include "Event.hpp"
+#include "types.hpp"
 
-#include "raul/Path.hpp"
+#include "ingen/Message.hpp"
+#include "raul/Maid.hpp"
 
 #include <list>
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+class Node;
+
 namespace server {
 
 class BlockImpl;
+class CompiledGraph;
+class Engine;
 class GraphImpl;
 class PortImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
-
-class Disconnect;
 
 /** An event to disconnect all connections to a Block.
  *
@@ -43,32 +51,32 @@ class Disconnect;
 class DisconnectAll : public Event
 {
 public:
-	DisconnectAll(Engine&                     engine,
-	              const SPtr<Interface>&      client,
-	              SampleCount                 timestamp,
-	              const ingen::DisconnectAll& msg);
+	DisconnectAll(Engine&                           engine,
+	              const std::shared_ptr<Interface>& client,
+	              SampleCount                       timestamp,
+	              const ingen::DisconnectAll&       msg);
 
 	DisconnectAll(Engine&    engine,
 	              GraphImpl* parent,
 	              Node*      object);
 
-	~DisconnectAll();
+	~DisconnectAll() override;
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
 private:
 	using Impls = std::list<Disconnect::Impl*>;
 
-	const ingen::DisconnectAll _msg;
-	GraphImpl*                 _parent;
-	BlockImpl*                 _block;
-	PortImpl*                  _port;
-	Impls                      _impls;
-	MPtr<CompiledGraph>        _compiled_graph;
-	bool                       _deleting;
+	const ingen::DisconnectAll       _msg;
+	GraphImpl*                       _parent;
+	BlockImpl*                       _block;
+	PortImpl*                        _port;
+	Impls                            _impls;
+	raul::managed_ptr<CompiledGraph> _compiled_graph;
+	bool                             _deleting;
 };
 
 } // namespace events

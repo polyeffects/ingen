@@ -17,18 +17,24 @@
 #ifndef INGEN_GUI_PLUGINMENU_HPP
 #define INGEN_GUI_PLUGINMENU_HPP
 
-#include "ingen/World.hpp"
-#include "ingen/types.hpp"
 #include "lilv/lilv.h"
 
 #include <gtkmm/menu.h>
+#include <sigc++/signal.h>
 
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 
+namespace Gtk {
+class MenuItem;
+} // namespace Gtk
+
 namespace ingen {
+
+class World;
 
 namespace client { class PluginModel; }
 
@@ -45,9 +51,9 @@ public:
 	PluginMenu(ingen::World& world);
 
 	void clear();
-	void add_plugin(SPtr<client::PluginModel> p);
+	void add_plugin(const std::shared_ptr<client::PluginModel>& p);
 
-	sigc::signal< void, WPtr<client::PluginModel> > signal_load_plugin;
+	sigc::signal<void, std::weak_ptr<client::PluginModel>> signal_load_plugin;
 
 private:
 	struct MenuRecord {
@@ -66,9 +72,10 @@ private:
 	                               const LV2Children&       children,
 	                               std::set<const char*>&   ancestors);
 
-	void add_plugin_to_menu(MenuRecord& menu, SPtr<client::PluginModel> p);
+	void add_plugin_to_menu(MenuRecord&                                 menu,
+	                        const std::shared_ptr<client::PluginModel>& p);
 
-	void load_plugin(WPtr<client::PluginModel> weak_plugin);
+	void load_plugin(const std::weak_ptr<client::PluginModel>& weak_plugin);
 
 	ingen::World& _world;
 	MenuRecord    _classless_menu;

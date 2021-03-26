@@ -18,14 +18,13 @@
 #define INGEN_ENGINE_PORTAUDIODRIVER_HPP
 
 #include "Driver.hpp"
-#include "EnginePort.hpp"
-#include "ingen_config.h"
+#include "EnginePort.hpp" // IWYU pragma: keep
 #include "types.hpp"
 
 #include "ingen/URI.hpp"
-#include "lv2/atom/forge.h"
 #include "raul/Semaphore.hpp"
 
+#include <boost/intrusive/slist.hpp>
 #include <portaudio.h>
 
 #include <atomic>
@@ -33,7 +32,16 @@
 #include <cstdint>
 #include <memory>
 
-namespace Raul { class Path; }
+namespace raul { class Path; }
+
+namespace boost {
+namespace intrusive {
+
+template <bool Enabled>
+struct cache_last;
+
+} // namespace intrusive
+} // namespace boost
 
 namespace ingen {
 
@@ -51,7 +59,7 @@ class PortAudioDriver : public Driver
 {
 public:
 	explicit PortAudioDriver(Engine& engine);
-	~PortAudioDriver();
+	~PortAudioDriver() override;
 
 	bool attach();
 
@@ -59,16 +67,16 @@ public:
 	void deactivate() override;
 
 	EnginePort* create_port(DuplexPort* graph_port) override;
-	EnginePort* get_port(const Raul::Path& path) override;
+	EnginePort* get_port(const raul::Path& path) override;
 
-	void rename_port(const Raul::Path& old_path, const Raul::Path& new_path) override;
-	void port_property(const Raul::Path& path, const URI& uri, const Atom& value) override;
-	void add_port(RunContext& context, EnginePort* port) override;
-	void remove_port(RunContext& context, EnginePort* port) override;
+	void rename_port(const raul::Path& old_path, const raul::Path& new_path) override;
+	void port_property(const raul::Path& path, const URI& uri, const Atom& value) override;
+	void add_port(RunContext& ctx, EnginePort* port) override;
+	void remove_port(RunContext& ctx, EnginePort* port) override;
 	void register_port(EnginePort& port) override;
 	void unregister_port(EnginePort& port) override;
 
-	void append_time_events(RunContext& context, Buffer& buffer) override {}
+	void append_time_events(RunContext& ctx, Buffer& buffer) override {}
 
 	SampleCount frame_time() const override;
 
@@ -88,7 +96,7 @@ private:
 	              const PaStreamCallbackTimeInfo* time,
 	              PaStreamCallbackFlags           flags,
 	              void*                           handle) {
-		return ((PortAudioDriver*)handle)->process_cb(
+		return static_cast<PortAudioDriver*>(handle)->process_cb(
 			inputs, outputs, nframes, time, flags);
 	}
 
@@ -98,12 +106,12 @@ private:
 	               const PaStreamCallbackTimeInfo* time,
 	               PaStreamCallbackFlags           flags);
 
-	void pre_process_port(RunContext&  context,
+	void pre_process_port(RunContext&  ctx,
 	                      EnginePort*  port,
 	                      const void*  inputs,
 	                      void*        outputs);
 
-	void post_process_port(RunContext& context,
+	void post_process_port(RunContext& ctx,
 	                       EnginePort* port,
 	                       const void* inputs,
 	                       void*       outputs);
@@ -116,7 +124,7 @@ protected:
 	Ports                       _ports;
 	PaStreamParameters          _inputParameters;
 	PaStreamParameters          _outputParameters;
-	Raul::Semaphore             _sem;
+	raul::Semaphore             _sem;
 	std::unique_ptr<FrameTimer> _timer;
 	PaStream*                   _stream;
 	size_t                      _seq_size;

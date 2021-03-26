@@ -19,15 +19,28 @@
 
 #include "ObjectMenu.hpp"
 
-#include "ingen/client/PortModel.hpp"
-#include "ingen/types.hpp"
-
-#include <gtkmm/builder.h>
 #include <gtkmm/menu.h>
-#include <gtkmm/menushell.h>
+
+#include <memory>
+
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+class MenuItem;
+} // namespace Gtk
 
 namespace ingen {
+
+namespace client {
+class PortModel;
+} // namespace client
+
 namespace gui {
+
+class App;
 
 /** Menu for a Port.
  *
@@ -39,9 +52,9 @@ public:
 	PortMenu(BaseObjectType*                   cobject,
 	         const Glib::RefPtr<Gtk::Builder>& xml);
 
-	void init(App&                          app,
-	          SPtr<const client::PortModel> port,
-	          bool                          internal_graph_port = false);
+	void init(App&                                            app,
+	          const std::shared_ptr<const client::PortModel>& port,
+	          bool internal_graph_port = false);
 
 private:
 	void on_menu_disconnect() override;

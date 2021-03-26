@@ -17,11 +17,14 @@
 #ifndef INGEN_ENGINE_LV2BLOCK_HPP
 #define INGEN_ENGINE_LV2BLOCK_HPP
 
-#include "BufferRef.hpp"
 #include "BlockImpl.hpp"
+#include "BufferRef.hpp"
+#include "State.hpp"
 #include "types.hpp"
 
 #include "ingen/LV2Features.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/URI.hpp"
 #include "lilv/lilv.h"
 #include "lv2/worker/worker.h"
 #include "raul/Array.hpp"
@@ -29,19 +32,46 @@
 #include "raul/Noncopyable.hpp"
 
 #include <boost/intrusive/slist.hpp>
+#include <boost/intrusive/slist_hook.hpp>
+#include <boost/optional/optional.hpp>
 
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <mutex>
+
+namespace raul {
+class Symbol;
+} // namespace raul
+
+namespace boost {
+namespace intrusive {
+
+template <bool Enabled>
+struct cache_last;
+
+template <bool Enabled>
+struct constant_time_size;
+
+} // namespace intrusive
+} // namespace boost
 
 namespace ingen {
 
 class FilePath;
+class Resource;
+class URIs;
+class World;
 
 namespace server {
 
+class BufferFactory;
+class Engine;
+class GraphImpl;
 class LV2Plugin;
+class RunContext;
+class Worker;
 
 /** An instance of a LV2 plugin.
  *
@@ -51,12 +81,12 @@ class LV2Block final : public BlockImpl
 {
 public:
 	LV2Block(LV2Plugin*          plugin,
-	         const Raul::Symbol& symbol,
+	         const raul::Symbol& symbol,
 	         bool                polyphonic,
 	         GraphImpl*          parent,
 	         SampleRate          srate);
 
-	~LV2Block();
+	~LV2Block() override;
 
 	bool instantiate(BufferFactory& bufs, const LilvState* state);
 
@@ -64,23 +94,24 @@ public:
 	bool          save_state(const FilePath& dir) const override;
 
 	BlockImpl* duplicate(Engine&             engine,
-	                     const Raul::Symbol& symbol,
+	                     const raul::Symbol& symbol,
 	                     GraphImpl*          parent) override;
 
 	bool prepare_poly(BufferFactory& bufs, uint32_t poly) override;
-	bool apply_poly(RunContext& context, uint32_t poly) override;
+	bool apply_poly(RunContext& ctx, uint32_t poly) override;
 
 	void activate(BufferFactory& bufs) override;
 	void deactivate() override;
 
 	LV2_Worker_Status work(uint32_t size, const void* data);
 
-	void run(RunContext& context) override;
-	void post_process(RunContext& context) override;
+	void run(RunContext& ctx) override;
+	void post_process(RunContext& ctx) override;
 
-	LilvState* load_preset(const URI& uri) override;
+	StatePtr load_preset(const URI& uri) override;
 
-	void apply_state(const UPtr<Worker>& worker, const LilvState* state) override;
+	void apply_state(const std::unique_ptr<Worker>& worker,
+	                 const LilvState*               state) override;
 
 	boost::optional<Resource> save_preset(const URI&        uri,
 	                                      const Properties& props) override;
@@ -90,10 +121,10 @@ public:
 	                     const BufferRef& buf,
 	                     SampleCount      offset) override;
 
-	static LilvState* load_state(World& world, const FilePath& path);
+	static StatePtr load_state(World& world, const FilePath& path);
 
 protected:
-	struct Instance : public Raul::Noncopyable {
+	struct Instance : public raul::Noncopyable {
 		explicit Instance(LilvInstance* i) : instance(i) {}
 
 		~Instance() { lilv_instance_free(instance); }
@@ -101,18 +132,16 @@ protected:
 		LilvInstance* const instance;
 	};
 
-	SPtr<Instance> make_instance(URIs&      uris,
-	                             SampleRate rate,
-	                             uint32_t   voice,
-	                             bool       preparing);
+	std::shared_ptr<Instance>
+	make_instance(URIs& uris, SampleRate rate, uint32_t voice, bool preparing);
 
 	inline LilvInstance* instance(uint32_t voice) {
-		return (LilvInstance*)(*_instances)[voice]->instance;
+		return static_cast<LilvInstance*>((*_instances)[voice]->instance);
 	}
 
-	using Instances = Raul::Array<SPtr<Instance>>;
+	using Instances = raul::Array<std::shared_ptr<Instance>>;
 
-	void drop_instances(const MPtr<Instances>& instances) {
+	static void drop_instances(const raul::managed_ptr<Instances>& instances) {
 		if (instances) {
 			for (size_t i = 0; i < instances->size(); ++i) {
 				(*instances)[i].reset();
@@ -120,8 +149,8 @@ protected:
 		}
 	}
 
-	struct Response : public Raul::Maid::Disposable
-	                , public Raul::Noncopyable
+	struct Response : public raul::Maid::Disposable
+	                , public raul::Noncopyable
 	                , public boost::intrusive::slist_base_hook<>
 	{
 		inline Response(uint32_t s, const void* d)
@@ -131,7 +160,7 @@ protected:
 			memcpy(data, d, s);
 		}
 
-		~Response() {
+		~Response() override {
 			free(data);
 		}
 
@@ -147,13 +176,13 @@ protected:
 	static LV2_Worker_Status work_respond(
 		LV2_Worker_Respond_Handle handle, uint32_t size, const void* data);
 
-	LV2Plugin*                      _lv2_plugin;
-	MPtr<Instances>                 _instances;
-	MPtr<Instances>                 _prepared_instances;
-	const LV2_Worker_Interface*     _worker_iface;
-	std::mutex                      _work_mutex;
-	Responses                       _responses;
-	SPtr<LV2Features::FeatureArray> _features;
+	LV2Plugin*                                 _lv2_plugin;
+	raul::managed_ptr<Instances>               _instances;
+	raul::managed_ptr<Instances>               _prepared_instances;
+	const LV2_Worker_Interface*                _worker_iface;
+	std::mutex                                 _work_mutex;
+	Responses                                  _responses;
+	std::shared_ptr<LV2Features::FeatureArray> _features;
 };
 
 } // namespace server

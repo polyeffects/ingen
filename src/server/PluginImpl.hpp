@@ -17,10 +17,15 @@
 #ifndef INGEN_ENGINE_PLUGINIMPL_HPP
 #define INGEN_ENGINE_PLUGINIMPL_HPP
 
+#include "ingen/Atom.hpp"
 #include "ingen/Resource.hpp"
+#include "ingen/URI.hpp"
+#include "lilv/lilv.h"
 #include "raul/Symbol.hpp"
 
-#include <cstdlib>
+#include <map>
+#include <string>
+#include <utility>
 
 namespace ingen {
 
@@ -48,14 +53,17 @@ public:
 	{
 	}
 
+	PluginImpl(const PluginImpl&) = delete;
+	PluginImpl& operator=(const PluginImpl&) = delete;
+
 	virtual BlockImpl* instantiate(BufferFactory&      bufs,
-	                               const Raul::Symbol& symbol,
+	                               const raul::Symbol& symbol,
 	                               bool                polyphonic,
 	                               GraphImpl*          parent,
 	                               Engine&             engine,
 	                               const LilvState*    state) = 0;
 
-	virtual Raul::Symbol symbol() const = 0;
+	virtual raul::Symbol symbol() const = 0;
 
 	const Atom& type() const            { return _type; }
 	void        set_type(const Atom& t) { _type = t; }
@@ -84,10 +92,6 @@ protected:
 	Presets _presets;
 	bool    _presets_loaded;
 	bool    _is_zombie;
-
-private:
-	PluginImpl(const PluginImpl&) = delete;
-	PluginImpl& operator=(const PluginImpl&) = delete;
 };
 
 } // namespace server

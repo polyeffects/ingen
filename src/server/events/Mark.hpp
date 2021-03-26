@@ -18,15 +18,26 @@
 #define INGEN_EVENTS_MARK_HPP
 
 #include "Event.hpp"
+#include "types.hpp"
+
+#include "raul/Maid.hpp"
 
 #include <map>
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+struct BundleBegin;
+struct BundleEnd;
+
 namespace server {
 
 class CompiledGraph;
 class Engine;
 class GraphImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -40,18 +51,21 @@ namespace events {
 class Mark : public Event
 {
 public:
-	Mark(Engine&                   engine,
-	     const SPtr<Interface>&    client,
-	     SampleCount               timestamp,
-	     const ingen::BundleBegin& msg);
+	Mark(Engine&                           engine,
+	     const std::shared_ptr<Interface>& client,
+	     SampleCount                       timestamp,
+	     const ingen::BundleBegin&         msg);
 
-	Mark(Engine&                 engine,
-	     const SPtr<Interface>&  client,
-	     SampleCount             timestamp,
-	     const ingen::BundleEnd& msg);
+	Mark(Engine&                           engine,
+	     const std::shared_ptr<Interface>& client,
+	     SampleCount                       timestamp,
+	     const ingen::BundleEnd&           msg);
 
+	~Mark() override;
+
+	void mark(PreProcessContext& ctx) override;
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 
 	Execution get_execution() const override;
@@ -59,7 +73,8 @@ public:
 private:
 	enum class Type { BUNDLE_BEGIN, BUNDLE_END };
 
-	using CompiledGraphs = std::map<GraphImpl*, MPtr<CompiledGraph>>;
+	using CompiledGraphs =
+	    std::map<GraphImpl*, raul::managed_ptr<CompiledGraph>>;
 
 	CompiledGraphs _compiled_graphs;
 	Type           _type;

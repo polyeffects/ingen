@@ -18,29 +18,33 @@
 
 #include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
-#include "BufferFactory.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
-#include "PluginImpl.hpp"
 #include "PortImpl.hpp"
 
 #include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Node.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/paths.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 
 namespace ingen {
 namespace server {
 namespace events {
 
-Get::Get(Engine&                engine,
-         const SPtr<Interface>& client,
-         SampleCount            timestamp,
-         const ingen::Get&      msg)
+Get::Get(Engine&                           engine,
+         const std::shared_ptr<Interface>& client,
+         SampleCount                       timestamp,
+         const ingen::Get&                 msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _msg(msg)
 	, _object(nullptr)
@@ -81,6 +85,11 @@ Get::pre_process(PreProcessContext&)
 	} else {
 		return Event::pre_process_done(Status::NOT_FOUND, uri);
 	}
+}
+
+void
+Get::execute(RunContext&)
+{
 }
 
 void

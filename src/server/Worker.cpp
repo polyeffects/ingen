@@ -21,11 +21,18 @@
 #include "LV2Block.hpp"
 
 #include "ingen/Log.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/memory.hpp"
+#include "lv2/core/lv2.h"
 #include "lv2/worker/worker.h"
 
 #include <cstdlib>
+#include <memory>
 
 namespace ingen {
+
+class World;
+
 namespace server {
 
 /// A message in the Worker::_requests ring
@@ -40,7 +47,7 @@ schedule(LV2_Worker_Schedule_Handle handle,
          uint32_t                   size,
          const void*                data)
 {
-	auto*   block  = (LV2Block*)handle;
+	auto*   block  = static_cast<LV2Block*>(handle);
 	Engine& engine = block->parent_graph()->engine();
 
 	return engine.worker()->request(block, size, data);
@@ -51,7 +58,7 @@ schedule_sync(LV2_Worker_Schedule_Handle handle,
               uint32_t                   size,
               const void*                data)
 {
-	auto*   block  = (LV2Block*)handle;
+	auto*   block  = static_cast<LV2Block*>(handle);
 	Engine& engine = block->parent_graph()->engine();
 
 	return engine.sync_worker()->request(block, size, data);
@@ -87,23 +94,24 @@ Worker::request(LV2Block*   block,
 	return LV2_WORKER_SUCCESS;
 }
 
-SPtr<LV2_Feature>
+std::shared_ptr<LV2_Feature>
 Worker::Schedule::feature(World&, Node* n)
 {
 	auto* block = dynamic_cast<LV2Block*>(n);
 	if (!block) {
-		return SPtr<LV2_Feature>();
+		return nullptr;
 	}
 
-	auto* data = (LV2_Worker_Schedule*)malloc(sizeof(LV2_Worker_Schedule));
+	auto* data = static_cast<LV2_Worker_Schedule*>(malloc(sizeof(LV2_Worker_Schedule)));
+
 	data->handle        = block;
 	data->schedule_work = synchronous ? schedule_sync : schedule;
 
-	auto* f = (LV2_Feature*)malloc(sizeof(LV2_Feature));
+	auto* f = static_cast<LV2_Feature*>(malloc(sizeof(LV2_Feature)));
 	f->URI  = LV2_WORKER__schedule;
 	f->data = data;
 
-	return SPtr<LV2_Feature>(f, &free_feature);
+	return std::shared_ptr<LV2_Feature>(f, &free_feature);
 }
 
 Worker::Worker(Log& log, uint32_t buffer_size, bool synchronous)
@@ -112,7 +120,7 @@ Worker::Worker(Log& log, uint32_t buffer_size, bool synchronous)
 	, _sem(0)
 	, _requests(buffer_size)
 	, _responses(buffer_size)
-	, _buffer((uint8_t*)malloc(buffer_size))
+	, _buffer(static_cast<uint8_t*>(malloc(buffer_size)))
 	, _buffer_size(buffer_size)
 	, _thread(nullptr)
 	, _exit_flag(false)

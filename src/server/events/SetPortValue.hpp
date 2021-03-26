@@ -25,11 +25,18 @@
 #include "ingen/Atom.hpp"
 
 #include <cstdint>
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
+class Engine;
 class PortImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -40,23 +47,23 @@ namespace events {
 class SetPortValue : public Event
 {
 public:
-	SetPortValue(Engine&                engine,
-	             const SPtr<Interface>& client,
-	             int32_t                id,
-	             SampleCount            timestamp,
-	             PortImpl*              port,
-	             const Atom&            value,
-	             bool                   activity,
-	             bool                   synthetic = false);
+	SetPortValue(Engine&                           engine,
+	             const std::shared_ptr<Interface>& client,
+	             int32_t                           id,
+	             SampleCount                       timestamp,
+	             PortImpl*                         port,
+	             const Atom&                       value,
+	             bool                              activity,
+	             bool                              synthetic = false);
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 
 	bool synthetic() const { return _synthetic; }
 
 private:
-	void apply(RunContext& context);
+	void apply(RunContext& ctx);
 
 	PortImpl*            _port;
 	const Atom           _value;

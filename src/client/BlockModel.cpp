@@ -16,39 +16,46 @@
 
 #include "ingen/client/BlockModel.hpp"
 
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/URIs.hpp"
-#include "ingen/World.hpp"
+#include "ingen/client/PluginModel.hpp"
 #include "ingen/client/PortModel.hpp"
+#include "lilv/lilv.h"
+#include "lv2/core/lv2.h"
+#include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
+#include <utility>
 
 namespace ingen {
 namespace client {
 
-BlockModel::BlockModel(URIs&                    uris,
-                       const SPtr<PluginModel>& plugin,
-                       const Raul::Path&        path)
-	: ObjectModel(uris, path)
-	, _plugin_uri(plugin->uri())
-	, _plugin(plugin)
-	, _num_values(0)
-	, _min_values(nullptr)
-	, _max_values(nullptr)
+BlockModel::BlockModel(URIs&                               uris,
+                       const std::shared_ptr<PluginModel>& plugin,
+                       const raul::Path&                   path)
+    : ObjectModel(uris, path)
+    , _plugin_uri(plugin->uri())
+    , _plugin(plugin)
+    , _num_values(0)
+    , _min_values(nullptr)
+    , _max_values(nullptr)
 {
 }
 
-BlockModel::BlockModel(URIs&             uris,
-                       const URI&        plugin_uri,
-                       const Raul::Path& path)
-	: ObjectModel(uris, path)
-	, _plugin_uri(plugin_uri)
-	, _num_values(0)
-	, _min_values(nullptr)
-	, _max_values(nullptr)
+BlockModel::BlockModel(URIs& uris, URI plugin_uri, const raul::Path& path)
+    : ObjectModel(uris, path)
+    , _plugin_uri(std::move(plugin_uri))
+    , _num_values(0)
+    , _min_values(nullptr)
+    , _max_values(nullptr)
 {
 }
 
@@ -56,8 +63,8 @@ BlockModel::BlockModel(const BlockModel& copy)
 	: ObjectModel(copy)
 	, _plugin_uri(copy._plugin_uri)
 	, _num_values(copy._num_values)
-	, _min_values((float*)malloc(sizeof(float) * _num_values))
-	, _max_values((float*)malloc(sizeof(float) * _num_values))
+	, _min_values(static_cast<float*>(malloc(sizeof(float) * _num_values)))
+	, _max_values(static_cast<float*>(malloc(sizeof(float) * _num_values)))
 {
 	memcpy(_min_values, copy._min_values, sizeof(float) * _num_values);
 	memcpy(_max_values, copy._max_values, sizeof(float) * _num_values);
@@ -69,7 +76,7 @@ BlockModel::~BlockModel()
 }
 
 void
-BlockModel::remove_port(const SPtr<PortModel>& port)
+BlockModel::remove_port(const std::shared_ptr<PortModel>& port)
 {
 	for (auto i = _ports.begin(); i != _ports.end(); ++i) {
 		if ((*i) == port) {
@@ -81,7 +88,7 @@ BlockModel::remove_port(const SPtr<PortModel>& port)
 }
 
 void
-BlockModel::remove_port(const Raul::Path& port_path)
+BlockModel::remove_port(const raul::Path& port_path)
 {
 	for (auto i = _ports.begin(); i != _ports.end(); ++i) {
 		if ((*i)->path() == port_path) {
@@ -103,26 +110,26 @@ BlockModel::clear()
 }
 
 void
-BlockModel::add_child(const SPtr<ObjectModel>& c)
+BlockModel::add_child(const std::shared_ptr<ObjectModel>& c)
 {
 	assert(c->parent().get() == this);
 
 	//ObjectModel::add_child(c);
 
-	SPtr<PortModel> pm = dynamic_ptr_cast<PortModel>(c);
+	auto pm = std::dynamic_pointer_cast<PortModel>(c);
 	assert(pm);
 	add_port(pm);
 }
 
 bool
-BlockModel::remove_child(const SPtr<ObjectModel>& c)
+BlockModel::remove_child(const std::shared_ptr<ObjectModel>& c)
 {
 	assert(c->path().is_child_of(path()));
 	assert(c->parent().get() == this);
 
 	//bool ret = ObjectModel::remove_child(c);
 
-	SPtr<PortModel> pm = dynamic_ptr_cast<PortModel>(c);
+	auto pm = std::dynamic_pointer_cast<PortModel>(c);
 	assert(pm);
 	remove_port(pm);
 
@@ -131,7 +138,7 @@ BlockModel::remove_child(const SPtr<ObjectModel>& c)
 }
 
 void
-BlockModel::add_port(const SPtr<PortModel>& pm)
+BlockModel::add_port(const std::shared_ptr<PortModel>& pm)
 {
 	assert(pm);
 	assert(pm->path().is_child_of(path()));
@@ -144,18 +151,18 @@ BlockModel::add_port(const SPtr<PortModel>& pm)
 	_signal_new_port.emit(pm);
 }
 
-SPtr<const PortModel>
-BlockModel::get_port(const Raul::Symbol& symbol) const
+std::shared_ptr<const PortModel>
+BlockModel::get_port(const raul::Symbol& symbol) const
 {
 	for (auto p : _ports) {
 		if (p->symbol() == symbol) {
 			return p;
 		}
 	}
-	return SPtr<PortModel>();
+	return std::shared_ptr<PortModel>();
 }
 
-SPtr<const PortModel>
+std::shared_ptr<const PortModel>
 BlockModel::get_port(uint32_t index) const
 {
 	return _ports[index];
@@ -170,10 +177,11 @@ BlockModel::port(uint32_t index) const
 }
 
 void
-BlockModel::default_port_value_range(const SPtr<const PortModel>& port,
-                                     float&                       min,
-                                     float&                       max,
-                                     uint32_t                     srate) const
+BlockModel::default_port_value_range(
+    const std::shared_ptr<const PortModel>& port,
+    float&                                  min,
+    float&                                  max,
+    uint32_t                                srate) const
 {
 	// Default control values
 	min = 0.0;
@@ -204,10 +212,10 @@ BlockModel::default_port_value_range(const SPtr<const PortModel>& port,
 }
 
 void
-BlockModel::port_value_range(const SPtr<const PortModel>& port,
-                             float&                       min,
-                             float&                       max,
-                             uint32_t                     srate) const
+BlockModel::port_value_range(const std::shared_ptr<const PortModel>& port,
+                             float&                                  min,
+                             float&                                  max,
+                             uint32_t srate) const
 {
 	assert(port->parent().get() == this);
 
@@ -224,7 +232,7 @@ BlockModel::port_value_range(const SPtr<const PortModel>& port,
 	}
 
 	if (max <= min) {
-		max = min + 1.0;
+		max = min + 1.0f;
 	}
 
 	if (port->port_property(_uris.lv2_sampleRate)) {
@@ -247,7 +255,7 @@ BlockModel::label() const
 }
 
 std::string
-BlockModel::port_label(const SPtr<const PortModel>& port) const
+BlockModel::port_label(const std::shared_ptr<const PortModel>& port) const
 {
 	const Atom& name = port->get_property(URI(LV2_CORE__name));
 	if (name.is_valid() && name.type() == _uris.forge.String) {
@@ -274,9 +282,9 @@ BlockModel::port_label(const SPtr<const PortModel>& port) const
 }
 
 void
-BlockModel::set(const SPtr<ObjectModel>& model)
+BlockModel::set(const std::shared_ptr<ObjectModel>& model)
 {
-	SPtr<BlockModel> block = dynamic_ptr_cast<BlockModel>(model);
+	auto block = std::dynamic_pointer_cast<BlockModel>(model);
 	if (block) {
 		_plugin_uri = block->_plugin_uri;
 		_plugin     = block->_plugin;

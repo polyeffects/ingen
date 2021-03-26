@@ -22,54 +22,55 @@
 #include "ingen/Parser.hpp"
 #include "ingen/World.hpp"
 #include "ingen/runtime_paths.hpp"
-#include "ingen/types.hpp"
 
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
 
-using namespace std;
-using namespace ingen;
+namespace ingen {
+namespace bench {
+namespace {
 
-unique_ptr<World> world;
+std::unique_ptr<ingen::World> world;
 
-static void
+void
 ingen_try(bool cond, const char* msg)
 {
 	if (!cond) {
-		cerr << "ingen: Error: " << msg << endl;
+		std::cerr << "ingen: Error: " << msg << std::endl;
 		world.reset();
 		exit(EXIT_FAILURE);
 	}
 }
 
-static std::string
+std::string
 real_path(const char* path)
 {
 	char* const c_real_path = realpath(path, nullptr);
-	const std::string result(c_real_path ? c_real_path : "");
+	std::string result(c_real_path ? c_real_path : "");
 	free(c_real_path);
 	return result;
 }
 
 int
-main(int argc, char** argv)
+run(int argc, char** argv)
 {
-	set_bundle_path_from_code((void*)&ingen_try);
-
 	// Create world
 	try {
-		world = unique_ptr<World>{new World(nullptr, nullptr, nullptr)};
+		world = std::unique_ptr<ingen::World>{
+		    new ingen::World(nullptr, nullptr, nullptr)};
+
 		world->conf().add(
 			"output", "output", 'O', "File to write benchmark output",
 			ingen::Configuration::SESSION, world->forge().String, Atom());
 		world->load_configuration(argc, argv);
 	} catch (std::exception& e) {
-		cout << "ingen: " << e.what() << endl;
+		std::cout << "ingen: " << e.what() << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -77,17 +78,21 @@ main(int argc, char** argv)
 	const Atom& load = world->conf().option("load");
 	const Atom& out  = world->conf().option("output");
 	if (!load.is_valid() || !out.is_valid()) {
-		cerr << "Usage: ingen_bench --load START_GRAPH --output OUT_FILE" << endl;
+		std::cerr << "Usage: ingen_bench --load START_GRAPH --output OUT_FILE"
+		          << std::endl;
+
 		return EXIT_FAILURE;
 	}
 
 	// Get start graph and output file options
-	const std::string start_graph = real_path((const char*)load.get_body());
-	const std::string out_file    = (const char*)out.get_body();
+	const std::string start_graph =
+	    real_path(static_cast<const char*>(load.get_body()));
+
+	const std::string out_file = static_cast<const char*>(out.get_body());
 	if (start_graph.empty()) {
-		cerr << "error: initial graph '"
-		     << ((const char*)load.get_body())
-		     << "' does not exist" << endl;
+		std::cerr << "error: initial graph '"
+		          << static_cast<const char*>(load.get_body())
+		          << "' does not exist" << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -103,7 +108,9 @@ main(int argc, char** argv)
 
 	// Load graph
 	if (!world->parser()->parse_file(*world, *world->interface(), start_graph)) {
-		cerr << "error: failed to load initial graph " << start_graph << endl;
+		std::cerr << "error: failed to load initial graph " << start_graph
+		          << std::endl;
+
 		return EXIT_FAILURE;
 	}
 	world->engine()->flush_events(std::chrono::milliseconds(20));
@@ -136,4 +143,17 @@ main(int argc, char** argv)
 	world->engine()->deactivate();
 
 	return EXIT_SUCCESS;
+}
+
+} // namespace
+} // namespace bench
+} // namespace ingen
+
+int
+main(int argc, char** argv)
+{
+	ingen::set_bundle_path_from_code(
+	    reinterpret_cast<void (*)()>(&ingen::bench::ingen_try));
+
+	return ingen::bench::run(argc, argv);
 }

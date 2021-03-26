@@ -19,20 +19,37 @@
 
 #include "Window.hpp"
 
-#include <gtkmm/builder.h>
+#include "ingen/URI.hpp"
+
+#include <gdk/gdk.h>
+#include <glibmm/refptr.h>
+#include <glibmm/ustring.h>
 #include <gtkmm/treemodel.h>
+#include <gtkmm/treemodelcolumn.h>
+#include <gtkmm/treeselection.h>
 #include <gtkmm/treestore.h>
 #include <gtkmm/treeview.h>
+#include <gtkmm/window.h>
 
-namespace Raul { class Path; }
+#include <memory>
+
+namespace Gtk {
+class Builder;
+} // namespace Gtk
 
 namespace ingen {
 
-namespace client { class ClientStore; class ObjectModel; }
+class Atom;
+
+namespace client {
+class ClientStore;
+class ObjectModel;
+class GraphModel;
+} // namespace client
 
 namespace gui {
 
-class GraphWindow;
+class App;
 class GraphTreeView;
 
 /** Window with a TreeView of all loaded graphs.
@@ -47,16 +64,17 @@ public:
 
 	void init(App& app, client::ClientStore& store);
 
-	void new_object(const SPtr<client::ObjectModel>& object);
+	void new_object(const std::shared_ptr<client::ObjectModel>& object);
 
-	void graph_property_changed(const URI&                      key,
-	                            const Atom&                     value,
-	                            const SPtr<client::GraphModel>& graph);
+	void
+	graph_property_changed(const URI&                                 key,
+	                       const Atom&                                value,
+	                       const std::shared_ptr<client::GraphModel>& graph);
 
-	void graph_moved(const SPtr<client::GraphModel>& graph);
+	void graph_moved(const std::shared_ptr<client::GraphModel>& graph);
 
-	void add_graph(const SPtr<client::GraphModel>& pm);
-	void remove_graph(const SPtr<client::GraphModel>& pm);
+	void add_graph(const std::shared_ptr<client::GraphModel>& pm);
+	void remove_graph(const std::shared_ptr<client::GraphModel>& pm);
 	void show_graph_menu(GdkEventButton* ev);
 
 protected:
@@ -65,9 +83,9 @@ protected:
 
 	void event_graph_enabled_toggled(const Glib::ustring& path_str);
 
-	Gtk::TreeModel::iterator find_graph(
-		Gtk::TreeModel::Children  root,
-		const SPtr<client::ObjectModel>& graph);
+	Gtk::TreeModel::iterator
+	find_graph(Gtk::TreeModel::Children                    root,
+	           const std::shared_ptr<client::ObjectModel>& graph);
 
 	GraphTreeView* _graphs_treeview;
 
@@ -79,12 +97,11 @@ protected:
 			add(graph_model_col);
 		}
 
-		Gtk::TreeModelColumn<Glib::ustring>             name_col;
-		Gtk::TreeModelColumn<bool>                      enabled_col;
-		Gtk::TreeModelColumn<SPtr<client::GraphModel> > graph_model_col;
+		Gtk::TreeModelColumn<Glib::ustring> name_col;
+		Gtk::TreeModelColumn<bool>          enabled_col;
+		Gtk::TreeModelColumn<std::shared_ptr<client::GraphModel>> graph_model_col;
 	};
 
-	App*                             _app;
 	GraphTreeModelColumns            _graph_tree_columns;
 	Glib::RefPtr<Gtk::TreeStore>     _graph_treestore;
 	Glib::RefPtr<Gtk::TreeSelection> _graph_tree_selection;
@@ -106,16 +123,16 @@ public:
 	bool on_button_press_event(GdkEventButton* ev) override {
 		bool ret = Gtk::TreeView::on_button_press_event(ev);
 
-		if ((ev->type == GDK_BUTTON_PRESS) && (ev->button == 3))
+		if ((ev->type == GDK_BUTTON_PRESS) && (ev->button == 3)) {
 			_window->show_graph_menu(ev);
+		}
 
 		return ret;
 	}
 
 private:
 	GraphTreeWindow* _window;
-
-}; // struct GraphTreeView
+};
 
 } // namespace gui
 } // namespace ingen

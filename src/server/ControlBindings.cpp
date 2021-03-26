@@ -36,6 +36,9 @@
 #include "lv2/urid/urid.h"
 #include "raul/Path.hpp"
 
+#include <boost/intrusive/bstree.hpp>
+
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -53,8 +56,7 @@ ControlBindings::ControlBindings(Engine& engine)
 	                       4096)) // FIXME: capacity?
 	, _forge()
 {
-	lv2_atom_forge_init(
-		&_forge, &engine.world().uri_map().urid_map_feature()->urid_map);
+	lv2_atom_forge_init(&_forge, &engine.world().uri_map().urid_map());
 }
 
 ControlBindings::~ControlBindings()
@@ -79,7 +81,7 @@ ControlBindings::binding_key(const Atom& binding) const
 	Key       key;
 	LV2_Atom* num = nullptr;
 	if (binding.type() == uris.atom_Object) {
-		const auto* obj = (const LV2_Atom_Object_Body*)binding.get_body();
+		const auto* obj = static_cast<const LV2_Atom_Object_Body*>(binding.get_body());
 		if (obj->otype == uris.midi_Bender) {
 			key = Key(Type::MIDI_BENDER);
 		} else if (obj->otype == uris.midi_ChannelPressure) {
@@ -87,7 +89,7 @@ ControlBindings::binding_key(const Atom& binding) const
 		} else if (obj->otype == uris.midi_Controller) {
 			lv2_atom_object_body_get(binding.size(),
 			                         obj,
-			                         (LV2_URID)uris.midi_controllerNumber,
+			                         uris.midi_controllerNumber.urid(),
 			                         &num,
 			                         nullptr);
 			if (!num) {
@@ -95,12 +97,12 @@ ControlBindings::binding_key(const Atom& binding) const
 			} else if (num->type != uris.atom_Int) {
 				_engine.log().rt_error("Controller number not an integer\n");
 			} else {
-				key = Key(Type::MIDI_CC, ((LV2_Atom_Int*)num)->body);
+				key = Key(Type::MIDI_CC, reinterpret_cast<LV2_Atom_Int*>(num)->body);
 			}
 		} else if (obj->otype == uris.midi_NoteOn) {
 			lv2_atom_object_body_get(binding.size(),
 			                         obj,
-			                         (LV2_URID)uris.midi_noteNumber,
+			                         uris.midi_noteNumber.urid(),
 			                         &num,
 			                         nullptr);
 			if (!num) {
@@ -108,7 +110,7 @@ ControlBindings::binding_key(const Atom& binding) const
 			} else if (num->type != uris.atom_Int) {
 				_engine.log().rt_error("Note number not an integer\n");
 			} else {
-				key = Key(Type::MIDI_NOTE, ((LV2_Atom_Int*)num)->body);
+				key = Key(Type::MIDI_NOTE, reinterpret_cast<LV2_Atom_Int*>(num)->body);
 			}
 		}
 	} else if (binding.type()) {
@@ -199,7 +201,10 @@ ControlBindings::port_value_changed(RunContext& ctx,
 			break;
 		}
 		if (size > 0) {
-			_feedback->append_event(ctx.nframes() - 1, size, (LV2_URID)uris.midi_MidiEvent, buf);
+			_feedback->append_event(ctx.nframes() - 1,
+			                        size,
+			                        static_cast<LV2_URID>(uris.midi_MidiEvent),
+			                        buf);
 		}
 	}
 }
@@ -217,18 +222,18 @@ ControlBindings::start_learn(PortImpl* port)
 }
 
 static void
-get_range(RunContext& context, const PortImpl* port, float* min, float* max)
+get_range(RunContext& ctx, const PortImpl* port, float* min, float* max)
 {
 	*min = port->minimum().get<float>();
 	*max = port->maximum().get<float>();
 	if (port->is_sample_rate()) {
-		*min *= context.engine().sample_rate();
-		*max *= context.engine().sample_rate();
+		*min *= ctx.engine().sample_rate();
+		*max *= ctx.engine().sample_rate();
 	}
 }
 
 float
-ControlBindings::control_to_port_value(RunContext&     context,
+ControlBindings::control_to_port_value(RunContext&     ctx,
                                        const PortImpl* port,
                                        Type            type,
                                        int16_t         value)
@@ -237,10 +242,10 @@ ControlBindings::control_to_port_value(RunContext&     context,
 	switch (type) {
 	case Type::MIDI_CC:
 	case Type::MIDI_CHANNEL_PRESSURE:
-		normal = (float)value / 127.0f;
+		normal = static_cast<float>(value) / 127.0f;
 		break;
 	case Type::MIDI_BENDER:
-		normal = (float)value / 16383.0f;
+		normal = static_cast<float>(value) / 16383.0f;
 		break;
 	case Type::MIDI_NOTE:
 		normal = (value == 0) ? 0.0f : 1.0f;
@@ -250,18 +255,18 @@ ControlBindings::control_to_port_value(RunContext&     context,
 	}
 
 	if (port->is_logarithmic()) {
-		normal = (expf(normal) - 1.0f) / ((float)M_E - 1.0f);
+		normal = (expf(normal) - 1.0f) / (static_cast<float>(M_E) - 1.0f);
 	}
 
 	float min = 0.0f;
 	float max = 1.0f;
-	get_range(context, port, &min, &max);
+	get_range(ctx, port, &min, &max);
 
 	return normal * (max - min) + min;
 }
 
 int16_t
-ControlBindings::port_value_to_control(RunContext& context,
+ControlBindings::port_value_to_control(RunContext& ctx,
                                        PortImpl*   port,
                                        Type        type,
                                        const Atom& value_atom)
@@ -272,7 +277,7 @@ ControlBindings::port_value_to_control(RunContext& context,
 
 	float min = 0.0f;
 	float max = 1.0f;
-	get_range(context, port, &min, &max);
+	get_range(ctx, port, &min, &max);
 
 	const float value  = value_atom.get<float>();
 	float       normal = (value - min) / (max - min);
@@ -286,7 +291,7 @@ ControlBindings::port_value_to_control(RunContext& context,
 	}
 
 	if (port->is_logarithmic()) {
-		normal = logf(normal * ((float)M_E - 1.0f) + 1.0f);
+		normal = logf(normal * (static_cast<float>(M_E) - 1.0f) + 1.0f);
 	}
 
 	switch (type) {
@@ -334,29 +339,29 @@ forge_binding(const URIs&           uris,
 }
 
 void
-ControlBindings::set_port_value(RunContext& context,
+ControlBindings::set_port_value(RunContext& ctx,
                                 PortImpl*   port,
                                 Type        type,
-                                int16_t     value)
+                                int16_t     value) const
 {
 	float min = 0.0f;
 	float max = 1.0f;
-	get_range(context, port, &min, &max);
+	get_range(ctx, port, &min, &max);
 
-	const float val = control_to_port_value(context, port, type, value);
+	const float val = control_to_port_value(ctx, port, type, value);
 
 	// TODO: Set port value property so it is saved
-	port->set_control_value(context, context.start(), val);
+	port->set_control_value(ctx, ctx.start(), val);
 
-	URIs& uris = context.engine().world().uris();
-	context.notify(uris.ingen_value, context.start(), port,
-	               sizeof(float), _forge.Float, &val);
+	URIs& uris = ctx.engine().world().uris();
+	ctx.notify(uris.ingen_value, ctx.start(), port,
+	           sizeof(float), _forge.Float, &val);
 }
 
 bool
-ControlBindings::finish_learn(RunContext& context, Key key)
+ControlBindings::finish_learn(RunContext& ctx, Key key)
 {
-	const ingen::URIs& uris    = context.engine().world().uris();
+	const ingen::URIs& uris    = ctx.engine().world().uris();
 	Binding*           binding = _learn_binding.exchange(nullptr);
 	if (!binding || (key.type == Type::MIDI_NOTE && !binding->port->is_toggled())) {
 		return false;
@@ -367,19 +372,19 @@ ControlBindings::finish_learn(RunContext& context, Key key)
 
 	LV2_Atom buf[16];
 	memset(buf, 0, sizeof(buf));
-	lv2_atom_forge_set_buffer(&_forge, (uint8_t*)buf, sizeof(buf));
+	lv2_atom_forge_set_buffer(&_forge, reinterpret_cast<uint8_t*>(buf), sizeof(buf));
 	forge_binding(uris, &_forge, key.type, key.num);
 	const LV2_Atom* atom = buf;
-	context.notify(uris.midi_binding,
-	               context.start(),
-	               binding->port,
-	               atom->size, atom->type, LV2_ATOM_BODY_CONST(atom));
+	ctx.notify(uris.midi_binding,
+	           ctx.start(),
+	           binding->port,
+	           atom->size, atom->type, LV2_ATOM_BODY_CONST(atom));
 
 	return true;
 }
 
 void
-ControlBindings::get_all(const Raul::Path& path, std::vector<Binding*>& bindings)
+ControlBindings::get_all(const raul::Path& path, std::vector<Binding*>& bindings)
 {
 	ThreadManager::assert_thread(THREAD_PRE_PROCESS);
 
@@ -412,7 +417,7 @@ ControlBindings::pre_process(RunContext& ctx, Buffer* buffer)
 	auto* seq = buffer->get<LV2_Atom_Sequence>();
 	LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
 		if (ev->body.type == uris.midi_MidiEvent) {
-			const auto* buf = (const uint8_t*)LV2_ATOM_BODY(&ev->body);
+			const auto* buf = static_cast<const uint8_t*>(LV2_ATOM_BODY(&ev->body));
 			const Key   key = midi_event_key(ev->body.size, buf, value);
 
 			if (_learn_binding && !!key) {

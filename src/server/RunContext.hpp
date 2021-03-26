@@ -17,13 +17,13 @@
 #ifndef INGEN_ENGINE_RUNCONTEXT_HPP
 #define INGEN_ENGINE_RUNCONTEXT_HPP
 
-#include "ingen/types.hpp"
 #include "types.hpp"
 
 #include "lv2/urid/urid.h"
 #include "raul/RingBuffer.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <thread>
 
 namespace ingen {
@@ -57,7 +57,7 @@ public:
 	 * a thread and execute tasks as they become available.
 	 */
 	RunContext(Engine&           engine,
-	           Raul::RingBuffer* event_sink,
+	           raul::RingBuffer* event_sink,
 	           unsigned          id,
 	           bool              threaded);
 
@@ -67,6 +67,9 @@ public:
 	 * lightweight and only serves to pass different time attributes.
 	 */
 	RunContext(const RunContext& copy);
+
+	RunContext& operator=(const RunContext&) = delete;
+	RunContext& operator=(RunContext&&) = delete;
 
 	/** Return true iff the given port should broadcast its value.
 	 *
@@ -101,7 +104,7 @@ public:
 	 * less time to avoid a dropout when running in real time).
 	 */
 	inline uint64_t duration() const {
-		return (uint64_t)_nframes * 1e6 / _rate;
+		return static_cast<uint64_t>(_nframes) * 1e6 / _rate;
 	}
 
 	inline void locate(FrameTime s, SampleCount nframes) {
@@ -138,15 +141,13 @@ public:
 	inline bool        realtime() const { return _realtime; }
 
 protected:
-	const RunContext& operator=(const RunContext& copy) = delete;
-
 	void run();
 
-	Engine&           _engine;      ///< Engine we're running in
-	Raul::RingBuffer* _event_sink;  ///< Port updates from process context
-	Task*             _task;        ///< Currently executing task
-	UPtr<std::thread> _thread;      ///< Thread (null for main run context)
-	unsigned          _id;          ///< Context ID
+	Engine&                      _engine;     ///< Engine we're running in
+	raul::RingBuffer*            _event_sink; ///< Updates from process context
+	Task*                        _task;       ///< Currently executing task
+	std::unique_ptr<std::thread> _thread;     ///< Thread (or null for main)
+	unsigned                     _id;         ///< Context ID
 
 	FrameTime   _start;      ///< Start frame of this cycle, timeline relative
 	FrameTime   _end;        ///< End frame of this cycle, timeline relative

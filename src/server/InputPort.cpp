@@ -29,17 +29,20 @@
 #include "ingen/Atom.hpp"
 #include "ingen/Node.hpp"
 #include "ingen/URIs.hpp"
+#include "lv2/urid/urid.h"
 #include "raul/Array.hpp"
+#include "raul/Maid.hpp"
 
 #include <cassert>
 #include <cstdlib>
+#include <memory>
 
 namespace ingen {
 namespace server {
 
 InputPort::InputPort(BufferFactory&      bufs,
                      BlockImpl*          parent,
-                     const Raul::Symbol& symbol,
+                     const raul::Symbol& symbol,
                      uint32_t            index,
                      uint32_t            poly,
                      PortType            type,
@@ -52,14 +55,14 @@ InputPort::InputPort(BufferFactory&      bufs,
 	const ingen::URIs& uris = bufs.uris();
 
 	if (parent->graph_type() != Node::GraphType::GRAPH) {
-		add_property(uris.rdf_type, uris.lv2_InputPort.urid);
+		add_property(uris.rdf_type, uris.lv2_InputPort.urid_atom());
 	}
 }
 
 bool
-InputPort::apply_poly(RunContext& context, const uint32_t poly)
+InputPort::apply_poly(RunContext& ctx, const uint32_t poly)
 {
-	const bool ret = PortImpl::apply_poly(context, poly);
+	const bool ret = PortImpl::apply_poly(ctx, poly);
 
 	(void)ret;
 	assert(_voices->size() >= (ret ? poly : 1));
@@ -68,11 +71,11 @@ InputPort::apply_poly(RunContext& context, const uint32_t poly)
 }
 
 bool
-InputPort::get_buffers(BufferFactory&      bufs,
-                       PortImpl::GetFn     get,
-                       const MPtr<Voices>& voices,
-                       uint32_t            poly,
-                       size_t              num_in_arcs) const
+InputPort::get_buffers(BufferFactory&                   bufs,
+                       PortImpl::GetFn                  get,
+                       const raul::managed_ptr<Voices>& voices,
+                       uint32_t                         poly,
+                       size_t                           num_in_arcs) const
 {
 	if (is_a(PortType::ATOM) && !_value.is_valid()) {
 		poly = 1;
@@ -100,9 +103,9 @@ InputPort::get_buffers(BufferFactory&      bufs,
 }
 
 bool
-InputPort::pre_get_buffers(BufferFactory& bufs,
-                           MPtr<Voices>&  voices,
-                           uint32_t       poly) const
+InputPort::pre_get_buffers(BufferFactory&             bufs,
+                           raul::managed_ptr<Voices>& voices,
+                           uint32_t                   poly) const
 {
 	return get_buffers(bufs, &BufferFactory::get_buffer, voices, poly, _num_arcs);
 }
@@ -144,37 +147,37 @@ InputPort::max_tail_poly(RunContext&) const
 }
 
 void
-InputPort::pre_process(RunContext& context)
+InputPort::pre_process(RunContext& ctx)
 {
 	if (_arcs.empty()) {
 		// No incoming arcs, just handle user-set value
 		for (uint32_t v = 0; v < _poly; ++v) {
 			// Update set state
-			update_set_state(context, v);
+			update_set_state(ctx, v);
 
 			// Prepare for write in case a set event executes this cycle
 			if (!_parent->is_main()) {
-				buffer(v)->prepare_write(context);
+				buffer(v)->prepare_write(ctx);
 			}
 		}
 	} else if (direct_connect()) {
 		// Directly connected, use source's buffer directly
 		for (uint32_t v = 0; v < _poly; ++v) {
-			_voices->at(v).buffer = _arcs.front().buffer(context, v);
+			_voices->at(v).buffer = _arcs.front().buffer(ctx, v);
 		}
 	} else {
 		// Mix down to local buffers in pre_run()
 		for (uint32_t v = 0; v < _poly; ++v) {
-			buffer(v)->prepare_write(context);
+			buffer(v)->prepare_write(ctx);
 		}
 	}
 }
 
 void
-InputPort::pre_run(RunContext& context)
+InputPort::pre_run(RunContext& ctx)
 {
 	if ((_user_buffer || !_arcs.empty()) && !direct_connect()) {
-		const uint32_t src_poly   = max_tail_poly(context);
+		const uint32_t src_poly   = max_tail_poly(ctx);
 		const uint32_t max_n_srcs = _arcs.size() * src_poly + 1;
 
 		for (uint32_t v = 0; v < _poly; ++v) {
@@ -196,24 +199,24 @@ InputPort::pre_run(RunContext& context)
 					// P -> 1 or 1 -> 1: all tail voices => each head voice
 					for (uint32_t w = 0; w < arc.tail()->poly(); ++w) {
 						assert(n_srcs < max_n_srcs);
-						srcs[n_srcs++] = arc.buffer(context, w).get();
+						srcs[n_srcs++] = arc.buffer(ctx, w).get();
 						assert(srcs[n_srcs - 1]);
 					}
 				} else {
 					// P -> P or 1 -> P: tail voice => corresponding head voice
 					assert(n_srcs < max_n_srcs);
-					srcs[n_srcs++] = arc.buffer(context, v).get();
+					srcs[n_srcs++] = arc.buffer(ctx, v).get();
 					assert(srcs[n_srcs - 1]);
 				}
 			}
 
 			// Then mix them into our buffer for this voice
-			mix(context, buffer(v).get(), srcs, n_srcs);
-			update_values(context.offset(), v);
+			mix(ctx, buffer(v).get(), srcs, n_srcs);
+			update_values(ctx.offset(), v);
 		}
 	} else if (is_a(PortType::CONTROL)) {
 		for (uint32_t v = 0; v < _poly; ++v) {
-			update_values(context.offset(), v);
+			update_values(ctx.offset(), v);
 		}
 	}
 }
@@ -238,10 +241,10 @@ InputPort::next_value_offset(SampleCount offset, SampleCount end) const
 }
 
 void
-InputPort::post_process(RunContext& context)
+InputPort::post_process(RunContext& ctx)
 {
 	if (!_arcs.empty() || _force_monitor_update) {
-		monitor(context, _force_monitor_update);
+		monitor(ctx, _force_monitor_update);
 		_force_monitor_update = false;
 	}
 

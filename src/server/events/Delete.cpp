@@ -19,9 +19,11 @@
 #include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
 #include "BufferFactory.hpp"
+#include "CompiledGraph.hpp"
 #include "ControlBindings.hpp"
 #include "DisconnectAll.hpp"
 #include "Driver.hpp"
+#include "DuplexPort.hpp"
 #include "Engine.hpp"
 #include "EnginePort.hpp"
 #include "GraphImpl.hpp"
@@ -29,24 +31,36 @@
 #include "PreProcessContext.hpp"
 
 #include "ingen/Forge.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/memory.hpp"
+#include "ingen/paths.hpp"
+#include "raul/Array.hpp"
 #include "raul/Maid.hpp"
 #include "raul/Path.hpp"
 
 #include <cassert>
 #include <cstddef>
+#include <memory>
 #include <mutex>
 #include <string>
 
 namespace ingen {
 namespace server {
+
+class RunContext;
+
 namespace events {
 
-Delete::Delete(Engine&                engine,
-               const SPtr<Interface>& client,
-               FrameTime              timestamp,
-               const ingen::Del&      msg)
+Delete::Delete(Engine&                           engine,
+               const std::shared_ptr<Interface>& client,
+               FrameTime                         timestamp,
+               const ingen::Del&                 msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _msg(msg)
 	, _engine_port(nullptr)
@@ -79,8 +93,8 @@ Delete::pre_process(PreProcessContext& ctx)
 		return Event::pre_process_done(Status::NOT_FOUND, _path);
 	}
 
-	if (!(_block = dynamic_ptr_cast<BlockImpl>(iter->second))) {
-		_port = dynamic_ptr_cast<DuplexPort>(iter->second);
+	if (!(_block = std::dynamic_pointer_cast<BlockImpl>(iter->second))) {
+		_port = std::dynamic_pointer_cast<DuplexPort>(iter->second);
 	}
 
 	if ((!_block && !_port) || (_port && !_engine.driver()->dynamic_ports())) {
@@ -121,9 +135,9 @@ Delete::pre_process(PreProcessContext& ctx)
 					_port_index_changes.emplace(
 						port->path(), std::make_pair(port->index(), i));
 					port->remove_property(uris.lv2_index, uris.patch_wildcard);
-					port->set_property(
-						uris.lv2_index,
-						_engine.buffer_factory()->forge().make((int32_t)i));
+					port->set_property(uris.lv2_index,
+					                   _engine.buffer_factory()->forge().make(
+					                       static_cast<int32_t>(i)));
 				}
 			}
 		}
@@ -137,18 +151,18 @@ Delete::pre_process(PreProcessContext& ctx)
 }
 
 void
-Delete::execute(RunContext& context)
+Delete::execute(RunContext& ctx)
 {
 	if (_status != Status::SUCCESS) {
 		return;
 	}
 
 	if (_disconnect_event) {
-		_disconnect_event->execute(context);
+		_disconnect_event->execute(ctx);
 	}
 
 	if (!_removed_bindings.empty()) {
-		_engine.control_bindings()->remove(context, _removed_bindings);
+		_engine.control_bindings()->remove(ctx, _removed_bindings);
 	}
 
 	GraphImpl* parent = _block ? _block->parent_graph() : nullptr;
@@ -157,7 +171,7 @@ Delete::execute(RunContext& context)
 		for (size_t i = 0; i < _ports_array->size(); ++i) {
 			PortImpl* const port = _ports_array->at(i);
 			if (port->index() != i) {
-				port->set_index(context, i);
+				port->set_index(ctx, i);
 			}
 		}
 
@@ -166,7 +180,7 @@ Delete::execute(RunContext& context)
 		parent->set_external_ports(std::move(_ports_array));
 
 		if (_engine_port) {
-			_engine.driver()->remove_port(context, _engine_port);
+			_engine.driver()->remove_port(ctx, _engine_port);
 		}
 	}
 

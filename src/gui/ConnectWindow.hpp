@@ -20,20 +20,26 @@
 #include "Window.hpp"
 
 #include "ingen/Message.hpp"
-#include "ingen/types.hpp"
-#include "lilv/lilv.h"
+#include "ingen/Status.hpp"
+#include "ingen/URI.hpp"
 
+#include <glibmm/refptr.h>
 #include <gtkmm/builder.h>
-#include <gtkmm/button.h>
-#include <gtkmm/entry.h>
-#include <gtkmm/image.h>
-#include <gtkmm/label.h>
-#include <gtkmm/progressbar.h>
-#include <gtkmm/radiobutton.h>
-#include <gtkmm/spinbutton.h>
+#include <gtkmm/dialog.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
+
+namespace Gtk {
+class Button;
+class Entry;
+class Image;
+class Label;
+class ProgressBar;
+class RadioButton;
+class SpinButton;
+} // namespace Gtk
 
 namespace ingen {
 
@@ -57,7 +63,7 @@ public:
 	ConnectWindow(BaseObjectType*            cobject,
 	              Glib::RefPtr<Gtk::Builder> xml);
 
-	void set_connected_to(SPtr<ingen::Interface> engine);
+	void set_connected_to(const std::shared_ptr<ingen::Interface>& engine);
 	void start(App& app, ingen::World& world);
 
 	bool attached()  const { return _finished_connecting; }

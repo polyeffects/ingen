@@ -17,15 +17,20 @@
 #ifndef INGEN_ENGINE_ARC_IMPL_HPP
 #define INGEN_ENGINE_ARC_IMPL_HPP
 
+// IWYU pragma: no_include "raul/Path.hpp"
+
 #include "BufferRef.hpp"
 
 #include "ingen/Arc.hpp"
 #include "raul/Noncopyable.hpp"
-#include "raul/Path.hpp"
 
 #include <boost/intrusive/slist_hook.hpp>
 
 #include <cstdint>
+
+namespace raul {
+class Path; // IWYU pragma: keep
+} // namespace raul
 
 namespace ingen {
 namespace server {
@@ -47,19 +52,19 @@ class RunContext;
  * \ingroup engine
  */
 class ArcImpl
-		: private Raul::Noncopyable
+		: private raul::Noncopyable
 		, public  Arc
 		, public  boost::intrusive::slist_base_hook<>
 {
 public:
 	ArcImpl(PortImpl* tail, PortImpl* head);
-	~ArcImpl();
+	~ArcImpl() override;
 
 	inline PortImpl* tail() const { return _tail; }
 	inline PortImpl* head() const { return _head; }
 
-	const Raul::Path& tail_path() const override;
-	const Raul::Path& head_path() const override;
+	const raul::Path& tail_path() const override;
+	const raul::Path& head_path() const override;
 
 	/** Get the buffer for a particular voice.
 	 * An Arc is smart - it knows the destination port requesting the

@@ -18,13 +18,23 @@
 #define INGEN_INTERNALS_TIME_HPP
 
 #include "InternalBlock.hpp"
+#include "types.hpp"
+
+namespace raul {
+class Symbol;
+} // namespace raul
 
 namespace ingen {
+
+class URIs;
+
 namespace server {
 
-class InputPort;
-class OutputPort;
+class BufferFactory;
+class GraphImpl;
 class InternalPlugin;
+class OutputPort;
+class RunContext;
 
 namespace internals {
 
@@ -39,12 +49,12 @@ class TimeNode : public InternalBlock
 public:
 	TimeNode(InternalPlugin*     plugin,
 	         BufferFactory&      bufs,
-	         const Raul::Symbol& symbol,
+	         const raul::Symbol& symbol,
 	         bool                polyphonic,
 	         GraphImpl*          parent,
 	         SampleRate          srate);
 
-	void run(RunContext& context) override;
+	void run(RunContext& ctx) override;
 
 	static InternalPlugin* internal_plugin(URIs& uris);
 
@@ -52,8 +62,8 @@ private:
 	OutputPort* _notify_port;
 };
 
+} // namespace internals
 } // namespace server
 } // namespace ingen
-} // namespace internals
 
 #endif // INGEN_INTERNALS_TIME_HPP

@@ -15,27 +15,38 @@
 */
 
 #include "App.hpp"
+#include "GraphBox.hpp"
+#include "GraphView.hpp"
+#include "GraphWindow.hpp"
 #include "LoadGraphWindow.hpp"
 #include "LoadPluginWindow.hpp"
 #include "NewSubgraphWindow.hpp"
-#include "GraphView.hpp"
-#include "GraphWindow.hpp"
 #include "PropertiesWindow.hpp"
 #include "RenameWindow.hpp"
 #include "WidgetFactory.hpp"
 #include "WindowFactory.hpp"
 
 #include "ingen/Log.hpp"
+#include "ingen/client/BlockModel.hpp"
 #include "ingen/client/GraphModel.hpp"
+#include "ingen/client/ObjectModel.hpp"
+
+#include <gdkmm/window.h>
+#include <glibmm/signalproxy.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
 
 #include <cassert>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace ingen {
 
-using namespace client;
+using client::BlockModel;
+using client::GraphModel;
+using client::ObjectModel;
 
 namespace gui {
 
@@ -98,7 +109,7 @@ WindowFactory::num_open_graph_windows()
 }
 
 GraphBox*
-WindowFactory::graph_box(SPtr<const GraphModel> graph)
+WindowFactory::graph_box(const std::shared_ptr<const GraphModel>& graph)
 {
 	GraphWindow* window = graph_window(graph);
 	if (window) {
@@ -109,7 +120,7 @@ WindowFactory::graph_box(SPtr<const GraphModel> graph)
 }
 
 GraphWindow*
-WindowFactory::graph_window(SPtr<const GraphModel> graph)
+WindowFactory::graph_window(const std::shared_ptr<const GraphModel>& graph)
 {
 	if (!graph) {
 		return nullptr;
@@ -121,13 +132,14 @@ WindowFactory::graph_window(SPtr<const GraphModel> graph)
 }
 
 GraphWindow*
-WindowFactory::parent_graph_window(SPtr<const BlockModel> block)
+WindowFactory::parent_graph_window(
+    const std::shared_ptr<const BlockModel>& block)
 {
 	if (!block) {
 		return nullptr;
 	}
 
-	return graph_window(dynamic_ptr_cast<GraphModel>(block->parent()));
+	return graph_window(std::dynamic_pointer_cast<GraphModel>(block->parent()));
 }
 
 /** Present a GraphWindow for a Graph.
@@ -137,9 +149,9 @@ WindowFactory::parent_graph_window(SPtr<const BlockModel> block)
  * presented and `preferred` left unmodified.
  */
 void
-WindowFactory::present_graph(SPtr<const GraphModel> graph,
-                             GraphWindow*           preferred,
-                             SPtr<GraphView>        view)
+WindowFactory::present_graph(const std::shared_ptr<const GraphModel>& graph,
+                             GraphWindow*                             preferred,
+                             const std::shared_ptr<GraphView>&        view)
 {
 	assert(!view || view->graph() == graph);
 
@@ -163,8 +175,8 @@ WindowFactory::present_graph(SPtr<const GraphModel> graph,
 }
 
 GraphWindow*
-WindowFactory::new_graph_window(SPtr<const GraphModel> graph,
-                                SPtr<GraphView>        view)
+WindowFactory::new_graph_window(const std::shared_ptr<const GraphModel>& graph,
+                                const std::shared_ptr<GraphView>&        view)
 {
 	assert(!view || view->graph() == graph);
 
@@ -205,8 +217,9 @@ WindowFactory::remove_graph_window(GraphWindow* win, GdkEventAny* ignored)
 }
 
 void
-WindowFactory::present_load_plugin(SPtr<const GraphModel> graph,
-                                   Properties             data)
+WindowFactory::present_load_plugin(
+    const std::shared_ptr<const GraphModel>& graph,
+    const Properties&                        data)
 {
 	_app.request_plugins_if_necessary();
 
@@ -219,7 +232,8 @@ WindowFactory::present_load_plugin(SPtr<const GraphModel> graph,
 	_load_plugin_win->set_modal(false);
 	_load_plugin_win->set_type_hint(Gdk::WINDOW_TYPE_HINT_DIALOG);
 	if (w->second) {
-		int width, height;
+		int width  = 0;
+		int height = 0;
 		w->second->get_size(width, height);
 		_load_plugin_win->set_default_size(width - width / 8, height / 2);
 	}
@@ -229,8 +243,9 @@ WindowFactory::present_load_plugin(SPtr<const GraphModel> graph,
 }
 
 void
-WindowFactory::present_load_graph(SPtr<const GraphModel> graph,
-                                  Properties             data)
+WindowFactory::present_load_graph(
+    const std::shared_ptr<const GraphModel>& graph,
+    const Properties&                        data)
 {
 	auto w = _graph_windows.find(graph->path());
 
@@ -242,8 +257,9 @@ WindowFactory::present_load_graph(SPtr<const GraphModel> graph,
 }
 
 void
-WindowFactory::present_load_subgraph(SPtr<const GraphModel> graph,
-                                     Properties             data)
+WindowFactory::present_load_subgraph(
+    const std::shared_ptr<const GraphModel>& graph,
+    const Properties&                        data)
 {
 	auto w = _graph_windows.find(graph->path());
 
@@ -255,8 +271,9 @@ WindowFactory::present_load_subgraph(SPtr<const GraphModel> graph,
 }
 
 void
-WindowFactory::present_new_subgraph(SPtr<const GraphModel> graph,
-                                    Properties             data)
+WindowFactory::present_new_subgraph(
+    const std::shared_ptr<const GraphModel>& graph,
+    const Properties&                        data)
 {
 	auto w = _graph_windows.find(graph->path());
 
@@ -268,7 +285,7 @@ WindowFactory::present_new_subgraph(SPtr<const GraphModel> graph,
 }
 
 void
-WindowFactory::present_rename(SPtr<const ObjectModel> object)
+WindowFactory::present_rename(const std::shared_ptr<const ObjectModel>& object)
 {
 	auto w = _graph_windows.find(object->path());
 	if (w == _graph_windows.end()) {
@@ -283,7 +300,8 @@ WindowFactory::present_rename(SPtr<const ObjectModel> object)
 }
 
 void
-WindowFactory::present_properties(SPtr<const ObjectModel> object)
+WindowFactory::present_properties(
+    const std::shared_ptr<const ObjectModel>& object)
 {
 	auto w = _graph_windows.find(object->path());
 	if (w == _graph_windows.end()) {

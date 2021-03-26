@@ -18,24 +18,37 @@
 #define INGEN_GUI_NODEMODULE_HPP
 
 #include "ganv/Module.hpp"
-#include "ingen/types.hpp"
+#include "ingen/URI.hpp"
 
-#include "Port.hpp"
+#include <gdk/gdk.h>
+#include <glib.h>
 
-namespace Raul { class Atom; }
+#include <cstdint>
+#include <memory>
 
-namespace ingen { namespace client {
+namespace Gtk {
+class Widget;
+class Window;
+} // namespace Gtk
+
+namespace ingen {
+
+class Atom;
+
+namespace client {
 class BlockModel;
 class PluginUI;
 class PortModel;
-} }
+} // namespace client
+} // namespace ingen
 
 namespace ingen {
 namespace gui {
 
+class App;
 class GraphCanvas;
-class Port;
 class NodeMenu;
+class Port;
 
 /** A module in a graphn.
  *
@@ -46,26 +59,28 @@ class NodeMenu;
 class NodeModule : public Ganv::Module
 {
 public:
-	static NodeModule* create(
-		GraphCanvas&                   canvas,
-		SPtr<const client::BlockModel> block,
-		bool                           human);
+	static NodeModule*
+	create(GraphCanvas&                                     canvas,
+	       const std::shared_ptr<const client::BlockModel>& block,
+	       bool                                             human);
 
-	virtual ~NodeModule();
+	~NodeModule() override;
 
 	App& app() const;
 
-	Port* port(SPtr<const client::PortModel> model);
+	Port* port(const std::shared_ptr<const client::PortModel>& model);
 
-	void delete_port_view(SPtr<const client::PortModel> model);
+	void
+	delete_port_view(const std::shared_ptr<const client::PortModel>& model);
 
 	virtual void store_location(double ax, double ay);
 	void show_human_names(bool b);
 
-	SPtr<const client::BlockModel> block() const { return _block; }
+	std::shared_ptr<const client::BlockModel> block() const { return _block; }
 
 protected:
-	NodeModule(GraphCanvas& canvas, SPtr<const client::BlockModel> block);
+	NodeModule(GraphCanvas&                                     canvas,
+	           const std::shared_ptr<const client::BlockModel>& block);
 
 	virtual bool on_double_click(GdkEventButton* ev);
 
@@ -81,7 +96,7 @@ protected:
 	void rename();
 	void property_changed(const URI& key, const Atom& value);
 
-	void new_port_view(SPtr<const client::PortModel> port);
+	void new_port_view(const std::shared_ptr<const client::PortModel>& port);
 
 	void port_activity(uint32_t index, const Atom& value);
 	void port_value_changed(uint32_t index, const Atom& value);
@@ -90,12 +105,12 @@ protected:
 
 	bool show_menu(GdkEventButton* ev);
 
-	SPtr<const client::BlockModel> _block;
-	NodeMenu*                      _menu;
-	SPtr<client::PluginUI>         _plugin_ui;
-	Gtk::Widget*                   _gui_widget;
-	Gtk::Window*                   _gui_window; ///< iff popped up
-	bool                           _initialised;
+	std::shared_ptr<const client::BlockModel> _block;
+	NodeMenu*                                 _menu;
+	std::shared_ptr<client::PluginUI>         _plugin_ui;
+	Gtk::Widget*                              _gui_widget;
+	Gtk::Window*                              _gui_window; ///< iff popped up
+	bool                                      _initialised;
 };
 
 } // namespace gui

@@ -19,9 +19,19 @@
 
 #include "ingen/LV2Features.hpp"
 #include "ingen/URIs.hpp"
+#include "lv2/core/lv2.h"
 #include "lv2/options/options.h"
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+
 namespace ingen {
+
+class Node;
+class World;
+
 namespace server {
 
 class LV2Options : public ingen::LV2Features::Feature {
@@ -38,7 +48,7 @@ public:
 
 	const char* uri() const override { return LV2_OPTIONS__options; }
 
-	SPtr<LV2_Feature> feature(World& w, Node* n) override {
+	std::shared_ptr<LV2_Feature> feature(World& w, Node* n) override {
 		const LV2_Options_Option options[] = {
 			{ LV2_OPTIONS_INSTANCE, 0, _uris.bufsz_minBlockLength,
 			  sizeof(int32_t), _uris.atom_Int, &_block_length },
@@ -51,18 +61,18 @@ public:
 			{ LV2_OPTIONS_INSTANCE, 0, 0, 0, 0, nullptr }
 		};
 
-		LV2_Feature* f = (LV2_Feature*)malloc(sizeof(LV2_Feature));
+		auto* f = static_cast<LV2_Feature*>(malloc(sizeof(LV2_Feature)));
 		f->URI  = LV2_OPTIONS__options;
 		f->data = malloc(sizeof(options));
 		memcpy(f->data, options, sizeof(options));
-		return SPtr<LV2_Feature>(f, &free_feature);
+		return std::shared_ptr<LV2_Feature>(f, &free_feature);
 	}
 
 private:
 	const URIs& _uris;
-	int32_t     _sample_rate;
-	int32_t     _block_length;
-	int32_t     _seq_size;
+	int32_t     _sample_rate  = 0;
+	int32_t     _block_length = 0;
+	int32_t     _seq_size     = 0;
 };
 
 } // namespace server

@@ -14,27 +14,31 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ingen/Store.hpp"
-#include "raul/Path.hpp"
-
-#include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
 #include "Driver.hpp"
 #include "Engine.hpp"
-#include "EnginePort.hpp"
-#include "GraphImpl.hpp"
 #include "events/Move.hpp"
 
+#include "ingen/Interface.hpp"
+#include "ingen/Status.hpp"
+#include "ingen/Store.hpp"
+#include "raul/Path.hpp"
+
+#include <map>
+#include <memory>
 #include <mutex>
 
 namespace ingen {
 namespace server {
+
+class EnginePort;
+
 namespace events {
 
-Move::Move(Engine&                engine,
-           const SPtr<Interface>& client,
-           SampleCount            timestamp,
-           const ingen::Move&     msg)
+Move::Move(Engine&                           engine,
+           const std::shared_ptr<Interface>& client,
+           SampleCount                       timestamp,
+           const ingen::Move&                msg)
 	: Event(engine, client, msg.seq, timestamp)
 	, _msg(msg)
 {
@@ -69,7 +73,7 @@ Move::pre_process(PreProcessContext&)
 }
 
 void
-Move::execute(RunContext& context)
+Move::execute(RunContext&)
 {
 }
 

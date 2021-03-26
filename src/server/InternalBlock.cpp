@@ -26,12 +26,15 @@
 #include "ingen/URIs.hpp"
 #include "raul/Array.hpp"
 
+#include <boost/smart_ptr/intrusive_ptr.hpp>
+
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
-namespace Raul {
+namespace raul {
 class Symbol;
-} // namespace Raul
+} // namespace raul
 
 namespace ingen {
 
@@ -43,7 +46,7 @@ class GraphImpl;
 class RunContext;
 
 InternalBlock::InternalBlock(PluginImpl*         plugin,
-                             const Raul::Symbol& symbol,
+                             const raul::Symbol& symbol,
                              bool                poly,
                              GraphImpl*          parent,
                              SampleRate          rate)
@@ -52,7 +55,7 @@ InternalBlock::InternalBlock(PluginImpl*         plugin,
 
 BlockImpl*
 InternalBlock::duplicate(Engine&             engine,
-                         const Raul::Symbol& symbol,
+                         const raul::Symbol& symbol,
                          GraphImpl*          parent)
 {
 	BufferFactory& bufs = *engine.buffer_factory();
@@ -70,12 +73,12 @@ InternalBlock::duplicate(Engine&             engine,
 }
 
 void
-InternalBlock::pre_process(RunContext& context)
+InternalBlock::pre_process(RunContext& ctx)
 {
 	for (uint32_t i = 0; i < num_ports(); ++i) {
 		PortImpl* const port = _ports->at(i);
 		if (port->is_input()) {
-			port->pre_process(context);
+			port->pre_process(ctx);
 		} else if (port->buffer_type() == _plugin->uris().atom_Sequence) {
 			/* Output sequences are initialized in LV2 format, an atom:Chunk
 			   with size set to the capacity of the buffer.  Internal nodes

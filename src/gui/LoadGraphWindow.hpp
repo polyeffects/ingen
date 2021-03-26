@@ -17,16 +17,26 @@
 #ifndef INGEN_GUI_LOADGRAPHWINDOW_HPP
 #define INGEN_GUI_LOADGRAPHWINDOW_HPP
 
-#include "ingen/Node.hpp"
-#include "ingen/types.hpp"
+#include "ingen/Properties.hpp"
+#include "raul/Symbol.hpp"
 
-#include <gtkmm/builder.h>
-#include <gtkmm/button.h>
-#include <gtkmm/entry.h>
+#include <glibmm/ustring.h>
 #include <gtkmm/filechooserdialog.h>
-#include <gtkmm/label.h>
-#include <gtkmm/radiobutton.h>
-#include <gtkmm/spinbutton.h>
+
+#include <memory>
+
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+class Button;
+class Entry;
+class Label;
+class RadioButton;
+class SpinButton;
+} // namespace Gtk
 
 namespace ingen {
 
@@ -50,11 +60,11 @@ public:
 
 	void init(App& app) { _app = &app; }
 
-	void set_graph(const SPtr<const client::GraphModel>& graph);
+	void set_graph(const std::shared_ptr<const client::GraphModel>& graph);
 
-	void present(const SPtr<const client::GraphModel>& graph,
-	             bool                                  import,
-	             const Properties&                     data);
+	void present(const std::shared_ptr<const client::GraphModel>& graph,
+	             bool                                             import,
+	             const Properties&                                data);
 
 protected:
 	void on_show() override;
@@ -67,28 +77,28 @@ private:
 	void cancel_clicked();
 	void ok_clicked();
 
-	Raul::Symbol symbol_from_filename(const Glib::ustring& filename);
-	Raul::Symbol avoid_symbol_clash(const Raul::Symbol& symbol);
+	raul::Symbol symbol_from_filename(const Glib::ustring& filename);
+	raul::Symbol avoid_symbol_clash(const raul::Symbol& symbol);
 
-	App* _app;
+	App* _app = nullptr;
 
 	Properties _initial_data;
 
-	SPtr<const client::GraphModel> _graph;
+	std::shared_ptr<const client::GraphModel> _graph;
 
-	Gtk::Label*       _symbol_label;
-	Gtk::Entry*       _symbol_entry;
-	Gtk::Label*       _ports_label;
-	Gtk::RadioButton* _merge_ports_radio;
-	Gtk::RadioButton* _insert_ports_radio;
-	Gtk::RadioButton* _poly_voices_radio;
-	Gtk::RadioButton* _poly_from_file_radio;
-	Gtk::SpinButton*  _poly_spinbutton;
-	Gtk::Button*      _ok_button;
-	Gtk::Button*      _cancel_button;
+	Gtk::Label*       _symbol_label = nullptr;
+	Gtk::Entry*       _symbol_entry = nullptr;
+	Gtk::Label*       _ports_label = nullptr;
+	Gtk::RadioButton* _merge_ports_radio = nullptr;
+	Gtk::RadioButton* _insert_ports_radio = nullptr;
+	Gtk::RadioButton* _poly_voices_radio = nullptr;
+	Gtk::RadioButton* _poly_from_file_radio = nullptr;
+	Gtk::SpinButton*  _poly_spinbutton = nullptr;
+	Gtk::Button*      _ok_button = nullptr;
+	Gtk::Button*      _cancel_button = nullptr;
 
-	bool _import;
-	bool _merge_ports;
+	bool _import = false;
+	bool _merge_ports = false;
 };
 
 } // namespace gui

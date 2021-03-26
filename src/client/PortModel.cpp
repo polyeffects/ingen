@@ -14,10 +14,17 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ingen/client/BlockModel.hpp"
 #include "ingen/client/PortModel.hpp"
 
+#include "ingen/Properties.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/client/ObjectModel.hpp"
+#include "lv2/urid/urid.h"
+
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <utility>
 
 namespace ingen {
@@ -55,7 +62,7 @@ bool
 PortModel::is_uri() const
 {
 	// FIXME: Resource::has_property doesn't work, URI != URID
-	for (auto p : properties()) {
+	for (const auto& p : properties()) {
 		if (p.second.type() == _uris.atom_URID &&
 		    static_cast<LV2_URID>(p.second.get<int32_t>()) == _uris.atom_URID) {
 			return true;
@@ -65,11 +72,11 @@ PortModel::is_uri() const
 }
 
 void
-PortModel::set(const SPtr<ObjectModel>& model)
+PortModel::set(const std::shared_ptr<ObjectModel>& model)
 {
 	ObjectModel::set(model);
 
-	SPtr<PortModel> port = dynamic_ptr_cast<PortModel>(model);
+	auto port = std::dynamic_pointer_cast<PortModel>(model);
 	if (port) {
 		_index = port->_index;
 		_direction = port->_direction;

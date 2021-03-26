@@ -2,7 +2,7 @@
 
 import os
 
-from waflib import Logs, Options, Utils
+from waflib import Build, Logs, Options, Utils
 from waflib.extras import autowaf
 
 # Package version
@@ -38,7 +38,6 @@ def options(ctx):
          'no-plugin': 'do not build ingen.lv2 plugin',
          'no-python': 'do not install Python bindings',
          'no-webkit': 'do not use webkit to display plugin documentation',
-         'no-jack-session': 'do not build JACK session support',
          'no-socket': 'do not build Socket interface',
          'debug-urids': 'print a trace of URI mapping',
          'portaudio': 'build PortAudio backend'})
@@ -53,43 +52,105 @@ def configure(conf):
     conf.load('autowaf', cache=True)
     autowaf.set_cxx_lang(conf, 'c++11')
 
+    if Options.options.strict:
+        # Check for programs used by lint target
+        conf.find_program("flake8", var="FLAKE8", mandatory=False)
+        conf.find_program("clang-tidy", var="CLANG_TIDY", mandatory=False)
+        conf.find_program("iwyu_tool", var="IWYU_TOOL", mandatory=False)
+
+    if Options.options.ultra_strict:
+        autowaf.add_compiler_flags(conf.env, 'cxx', {
+            'clang': [
+                '-Wno-cast-align',
+                '-Wno-cast-qual',
+                '-Wno-documentation-unknown-command',
+                '-Wno-exit-time-destructors',
+                '-Wno-float-conversion',
+                '-Wno-float-equal',
+                '-Wno-format-nonliteral',
+                '-Wno-global-constructors',
+                '-Wno-implicit-float-conversion',
+                '-Wno-implicit-int-conversion',
+                '-Wno-nullability-extension',
+                '-Wno-nullable-to-nonnull-conversion',
+                '-Wno-padded',
+                '-Wno-reserved-id-macro',
+                '-Wno-shadow-field',
+                '-Wno-shorten-64-to-32',
+                '-Wno-sign-conversion',
+                '-Wno-switch-enum',
+                '-Wno-unreachable-code',
+                '-Wno-unused-parameter',
+                '-Wno-vla',
+                '-Wno-vla-extension',
+                '-Wno-weak-vtables',
+            ],
+            'gcc': [
+                '-Wno-cast-align',
+                '-Wno-cast-qual',
+                '-Wno-conditionally-supported',
+                '-Wno-conversion',
+                '-Wno-effc++',
+                '-Wno-float-conversion',
+                '-Wno-float-equal',
+                '-Wno-format',
+                '-Wno-format-nonliteral',
+                '-Wno-multiple-inheritance',
+                '-Wno-padded',
+                '-Wno-sign-conversion',
+                '-Wno-stack-protector',
+                '-Wno-suggest-attribute=format',
+                '-Wno-suggest-override',
+                '-Wno-switch-enum',
+                '-Wno-unreachable-code',
+                '-Wno-unused-parameter',
+                '-Wno-useless-cast',
+                '-Wno-vla',
+            ],
+        })
+
     conf.check_cxx(header_name='boost/intrusive/slist.hpp')
-    conf.check_cxx(msg='Checking for thread_local keyword',
-                   mandatory=False,
-                   fragment='thread_local int i = 0; int main() {}',
-                   define_name='INGEN_HAVE_THREAD_LOCAL')
-    if not conf.is_defined('INGEN_HAVE_THREAD_LOCAL'):
-        conf.check_cxx(msg='Checking for __thread keyword',
-                       mandatory=False,
-                       fragment='__thread int i = 0; int main() {}',
-                       define_name='INGEN_HAVE_THREAD_BUILTIN')
 
     conf.check_pkg('lv2 >= 1.16.0', uselib_store='LV2')
     conf.check_pkg('lilv-0 >= 0.21.5', uselib_store='LILV')
     conf.check_pkg('suil-0 >= 0.8.7', uselib_store='SUIL')
     conf.check_pkg('sratom-0 >= 0.4.6', uselib_store='SRATOM')
-    conf.check_pkg('raul-1 >= 1.0.0', uselib_store='RAUL')
+    conf.check_pkg('raul-1 >= 1.1.0', uselib_store='RAUL')
     conf.check_pkg('serd-0 >= 0.30.3', uselib_store='SERD', mandatory=False)
     conf.check_pkg('sord-0 >= 0.12.0', uselib_store='SORD', mandatory=False)
-    conf.check_pkg('portaudio-2.0', uselib_store='PORTAUDIO', mandatory=False)
-    conf.check_pkg('sigc++-2.0', uselib_store='SIGCPP', mandatory=False)
+
+    conf.check_pkg('portaudio-2.0',
+                   uselib_store = 'PORTAUDIO',
+                   system       = True,
+                   mandatory    = False)
+
+    conf.check_pkg('sigc++-2.0',
+                   uselib_store = 'SIGCPP',
+                   system       = True,
+                   mandatory    = False)
 
     conf.check_function('cxx', 'posix_memalign',
                         defines     = '_POSIX_C_SOURCE=200809L',
                         header_name = 'stdlib.h',
                         define_name = 'HAVE_POSIX_MEMALIGN',
+                        return_type = 'int',
+                        arg_types   = 'void**,size_t,size_t',
                         mandatory   = False)
 
     conf.check_function('cxx', 'isatty',
                         header_name = 'unistd.h',
                         defines     = '_POSIX_C_SOURCE=200809L',
                         define_name = 'HAVE_ISATTY',
+                        return_type = 'int',
+                        arg_types   = 'int',
                         mandatory   = False)
 
     conf.check_function('cxx', 'vasprintf',
                         header_name = 'stdio.h',
                         defines     = '_GNU_SOURCE=1',
                         define_name = 'HAVE_VASPRINTF',
+                        return_type = 'int',
+                        arg_types   = 'char**,const char*,va_list',
                         mandatory   = False)
 
     conf.check(define_name = 'HAVE_LIBDL',
@@ -98,9 +159,11 @@ def configure(conf):
 
     if not Options.options.no_socket:
         conf.check_function('cxx', 'socket',
-                            header_name   = 'sys/socket.h',
-                            define_name   = 'HAVE_SOCKET',
-                            mandatory     = False)
+                            header_name = 'sys/socket.h',
+                            define_name = 'HAVE_SOCKET',
+                            return_type = 'int',
+                            arg_types   = 'int,int,int',
+                            mandatory   = False)
 
     if not Options.options.no_python:
         conf.check_python_version((2, 4, 0), mandatory=False)
@@ -109,19 +172,29 @@ def configure(conf):
         conf.env.INGEN_BUILD_LV2 = 1
 
     if not Options.options.no_jack:
-        conf.check_pkg('jack >= 0.120.0', uselib_store='JACK', mandatory=False)
+        conf.check_pkg('jack >= 0.120.0',
+                       uselib_store = 'JACK',
+                       system       = True,
+                       mandatory    = False)
+
         conf.check_function('cxx', 'jack_set_property',
                             header_name   = 'jack/metadata.h',
                             define_name   = 'HAVE_JACK_METADATA',
                             uselib        = 'JACK',
+                            return_type   = 'int',
+                            arg_types     = '''jack_client_t*,
+                                               jack_uuid_t,
+                                               const char*,
+                                               const char*,
+                                               const char*''',
                             mandatory     = False)
         conf.check_function('cxx', 'jack_port_rename',
                             header_name   = 'jack/jack.h',
                             define_name   = 'HAVE_JACK_PORT_RENAME',
                             uselib        = 'JACK',
+                            return_type   = 'int',
+                            arg_types     = 'jack_client_t*,jack_port_t*,const char*',
                             mandatory     = False)
-        if not Options.options.no_jack_session:
-            conf.define('INGEN_JACK_SESSION', 1)
 
     if Options.options.debug_urids:
         conf.define('INGEN_DEBUG_URIDS', 1)
@@ -175,7 +248,6 @@ def configure(conf):
          'HTML plugin doc support': bool(conf.env.HAVE_WEBKIT),
          'PortAudio driver': bool(conf.env.HAVE_PORTAUDIO),
          'Jack driver': bool(conf.env.HAVE_JACK),
-         'Jack session support': conf.is_defined('INGEN_JACK_SESSION'),
          'Jack metadata support': conf.is_defined('HAVE_JACK_METADATA'),
          'LV2 plugin driver': bool(conf.env.INGEN_BUILD_LV2),
          'LV2 bundle': conf.env.INGEN_BUNDLE_DIR,
@@ -214,7 +286,7 @@ def build(bld):
     bld(features     = 'c cxx cxxprogram',
         source       = 'src/ingen/ingen.cpp',
         target       = 'ingen',
-        includes     = ['.'],
+        includes     = ['.', 'include'],
         use          = 'libingen',
         uselib       = 'SERD SORD SRATOM RAUL LILV LV2',
         install_path = '${BINDIR}')
@@ -225,7 +297,7 @@ def build(bld):
             bld(features     = 'cxx cxxprogram',
                 source       = 'tests/%s.cpp' % i,
                 target       = 'tests/%s' % i,
-                includes     = ['.'],
+                includes     = ['.', 'include'],
                 use          = 'libingen',
                 uselib       = 'SERD SORD SRATOM RAUL LILV LV2',
                 install_path = '',
@@ -274,14 +346,19 @@ def build(bld):
     bld.add_post_fun(autowaf.run_ldconfig)
 
 
+class LintContext(Build.BuildContext):
+    fun = cmd = 'lint'
+
+
 def lint(ctx):
     "checks code for style issues"
     import subprocess
+    import sys
 
-    status = 0
+    st = 0
 
-    # Check Python style with flake8
-    try:
+    if "FLAKE8" in ctx.env:
+        Logs.info("Running flake8")
         for i in ["src/client/wscript",
                   "src/gui/wscript",
                   "src/server/wscript",
@@ -290,16 +367,16 @@ def lint(ctx):
                   "scripts/ingenish",
                   "scripts/ingenams",
                   "wscript"]:
-            status += subprocess.call(["flake8",
-                                       "--ignore", "E221,W504,E251,E501",
-                                       i])
-    except Exception:
-        Logs.warn('warning: Failed to call flake8')
+            st += subprocess.call([ctx.env.FLAKE8[0],
+                                   "--ignore", "E221,W504,E251,E501",
+                                   i])
+    else:
+        Logs.warn("Not running flake8")
 
-    # Check for C/C++ issues with clang-tidy
-    try:
+    if "CLANG_TIDY" in ctx.env and "clang" in ctx.env.CXX[0]:
+        Logs.info("Running clang-tidy")
+
         import json
-        import sys
 
         with open('build/compile_commands.json', 'r') as db:
             commands = json.load(db)
@@ -308,32 +385,28 @@ def lint(ctx):
         for step_files in zip(*(iter(files),) * Options.options.jobs):
             procs = []
             for f in step_files:
-                out_filename = f.replace('../', '').replace('/', '_') + '.tidy'
-                out_file = open(os.path.join('build', out_filename), 'w+')
-                procs += [(subprocess.Popen(['clang-tidy', '--quiet', f],
-                                            cwd='build',
-                                            stdout=out_file,
-                                            stderr=subprocess.STDOUT),
-                           out_file)]
+                cmd = [ctx.env.CLANG_TIDY[0], '--quiet', '-p=.', f]
+                procs += [subprocess.Popen(cmd, cwd='build')]
 
             for proc in procs:
-                proc[0].wait()
-                proc[1].seek(0)
-                for line in proc[1]:
-                    sys.stdout.write(line)
-                proc[1].close()
+                proc.communicate()
+                st += proc.returncode
+    else:
+        Logs.warn("Not running clang-tidy")
 
-    except Exception as e:
-        Logs.warn('warning: Failed to call clang-tidy (%s)' % e)
+    if "IWYU_TOOL" in ctx.env:
+        Logs.info("Running include-what-you-use")
+        cmd = [ctx.env.IWYU_TOOL[0], "-o", "clang", "-p", "build"]
+        output = subprocess.check_output(cmd).decode('utf-8')
+        if 'error: ' in output:
+            sys.stdout.write(output)
+            st += 1
+    else:
+        Logs.warn("Not running include-what-you-use")
 
-    # Check includes with include-what-you-use
-    try:
-        subprocess.call(['iwyu_tool.py', '-o', 'clang', '-p', 'build'])
-    except Exception:
-        Logs.warn('warning: Failed to call iwyu_tool.py')
-
-    if status != 0:
-        ctx.fatal("Lint checks failed")
+    if st != 0:
+        Logs.warn("Lint checks failed")
+        sys.exit(st)
 
 
 def upload_docs(ctx):

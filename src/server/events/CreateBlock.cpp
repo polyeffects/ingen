@@ -19,45 +19,64 @@
 #include "BlockFactory.hpp"
 #include "BlockImpl.hpp"
 #include "Broadcaster.hpp"
+#include "CompiledGraph.hpp"
 #include "Engine.hpp"
 #include "GraphImpl.hpp"
 #include "LV2Block.hpp"
 #include "PluginImpl.hpp"
 #include "PreProcessContext.hpp"
+#include "State.hpp"
+#include "types.hpp"
 
+#include "ingen/FilePath.hpp"
 #include "ingen/Forge.hpp"
+#include "ingen/Interface.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/Properties.hpp"
+#include "ingen/Resource.hpp"
+#include "ingen/Status.hpp"
 #include "ingen/Store.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/URIs.hpp"
 #include "ingen/World.hpp"
+#include "ingen/paths.hpp"
 #include "raul/Maid.hpp"
 #include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
 
+#include <map>
+#include <memory>
 #include <utility>
 
 namespace ingen {
 namespace server {
+
+class RunContext;
+
 namespace events {
 
-CreateBlock::CreateBlock(Engine&                engine,
-                         const SPtr<Interface>& client,
-                         int32_t                id,
-                         SampleCount            timestamp,
-                         const Raul::Path&      path,
-                         Properties&            properties)
-	: Event(engine, client, id, timestamp)
-	, _path(path)
-	, _properties(properties)
-	, _graph(nullptr)
-	, _block(nullptr)
+CreateBlock::CreateBlock(Engine&                           engine,
+                         const std::shared_ptr<Interface>& client,
+                         int32_t                           id,
+                         SampleCount                       timestamp,
+                         raul::Path                        path,
+                         Properties&                       properties)
+    : Event(engine, client, id, timestamp)
+    , _path(std::move(path))
+    , _properties(properties)
+    , _graph(nullptr)
+    , _block(nullptr)
 {}
+
+CreateBlock::~CreateBlock() = default;
 
 bool
 CreateBlock::pre_process(PreProcessContext& ctx)
 {
 	using iterator = Properties::const_iterator;
 
-	const ingen::URIs& uris  = _engine.world().uris();
-	const SPtr<Store>  store = _engine.store();
+	const ingen::URIs&           uris  = _engine.world().uris();
+	const std::shared_ptr<Store> store = _engine.store();
 
 	// Check sanity of target path
 	if (_path.is_root()) {
@@ -101,7 +120,7 @@ CreateBlock::pre_process(PreProcessContext& ctx)
 		if (!ancestor) {
 			return Event::pre_process_done(Status::PROTOTYPE_NOT_FOUND, prototype);
 		} else if (!(_block = ancestor->duplicate(
-			             _engine, Raul::Symbol(_path.symbol()), _graph))) {
+			             _engine, raul::Symbol(_path.symbol()), _graph))) {
 			return Event::pre_process_done(Status::CREATION_FAILED, _path);
 		}
 
@@ -119,7 +138,7 @@ CreateBlock::pre_process(PreProcessContext& ctx)
 		}
 
 		// Load state from directory if given in properties
-		LilvState* state = nullptr;
+		StatePtr state{};
 		auto s = _properties.find(uris.state_state);
 		if (s != _properties.end() && s->second.type() == uris.forge.Path) {
 			state = LV2Block::load_state(
@@ -128,11 +147,11 @@ CreateBlock::pre_process(PreProcessContext& ctx)
 
 		// Instantiate plugin
 		if (!(_block = plugin->instantiate(*_engine.buffer_factory(),
-		                                   Raul::Symbol(_path.symbol()),
+		                                   raul::Symbol(_path.symbol()),
 		                                   polyphonic,
 		                                   _graph,
 		                                   _engine,
-		                                   state))) {
+		                                   state.get()))) {
 			return Event::pre_process_done(Status::CREATION_FAILED, _path);
 		}
 	}

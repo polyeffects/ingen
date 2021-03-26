@@ -18,7 +18,9 @@
 
 #include "Buffer.hpp"
 #include "RunContext.hpp"
+#include "types.hpp"
 
+#include "lv2/atom/atom.h"
 #include "lv2/atom/util.h"
 
 namespace ingen {
@@ -27,21 +29,21 @@ namespace server {
 static inline bool
 is_end(const Buffer* buf, const LV2_Atom_Event* ev)
 {
-	const LV2_Atom* atom = buf->get<const LV2_Atom>();
+	const auto* atom = buf->get<const LV2_Atom>();
 	return lv2_atom_sequence_is_end(
-		(const LV2_Atom_Sequence_Body*)LV2_ATOM_BODY_CONST(atom),
+		static_cast<const LV2_Atom_Sequence_Body*>(LV2_ATOM_BODY_CONST(atom)),
 		atom->size,
 		ev);
 }
 
 void
-mix(const RunContext&   context,
+mix(const RunContext&   ctx,
     Buffer*             dst,
     const Buffer*const* srcs,
     uint32_t            num_srcs)
 {
 	if (num_srcs == 1) {
-		dst->copy(context, srcs[0]);
+		dst->copy(ctx, srcs[0]);
 	} else if (dst->is_control()) {
 		Sample* const out = dst->samples();
 		out[0] = srcs[0]->value_at(0);
@@ -50,23 +52,23 @@ mix(const RunContext&   context,
 		}
 	} else if (dst->is_audio()) {
 		// Copy the first source
-		dst->copy(context, srcs[0]);
+		dst->copy(ctx, srcs[0]);
 
 		// Mix in the rest
 		Sample* __restrict const out = dst->samples();
-		const SampleCount        end = context.nframes();
+		const SampleCount        end = ctx.nframes();
 		for (uint32_t i = 1; i < num_srcs; ++i) {
 			const Sample* __restrict const in = srcs[i]->samples();
 			if (srcs[i]->is_control()) {  // control => audio
-				for (SampleCount i = 0; i < end; ++i) {
-					out[i] += in[0];
+				for (SampleCount j = 0; j < end; ++j) {
+					out[j] += in[0];
 				}
 			} else if (srcs[i]->is_audio()) {  // audio => audio
-				for (SampleCount i = 0; i < end; ++i) {
-					out[i] += in[i];
+				for (SampleCount j = 0; j < end; ++j) {
+					out[j] += in[j];
 				}
 			} else if (srcs[i]->is_sequence()) {  // sequence => audio
-				dst->render_sequence(context, srcs[i], true);
+				dst->render_sequence(ctx, srcs[i], true);
 			}
 		}
 	} else if (dst->is_sequence()) {
@@ -74,7 +76,7 @@ mix(const RunContext&   context,
 		for (uint32_t i = 0; i < num_srcs; ++i) {
 			iters[i] = nullptr;
 			if (srcs[i]->is_sequence()) {
-				const LV2_Atom_Sequence* seq = srcs[i]->get<const LV2_Atom_Sequence>();
+				const auto* seq = srcs[i]->get<const LV2_Atom_Sequence>();
 				iters[i] = lv2_atom_sequence_begin(&seq->body);
 				if (is_end(srcs[i], iters[i])) {
 					iters[i] = nullptr;
@@ -96,7 +98,7 @@ mix(const RunContext&   context,
 			if (first) {
 				dst->append_event(
 					first->time.frames, first->body.size, first->body.type,
-					(const uint8_t*)LV2_ATOM_BODY_CONST(&first->body));
+					static_cast<const uint8_t*>(LV2_ATOM_BODY_CONST(&first->body)));
 
 				iters[first_i] = lv2_atom_sequence_next(first);
 				if (is_end(srcs[first_i], iters[first_i])) {

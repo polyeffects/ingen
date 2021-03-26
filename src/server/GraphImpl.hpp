@@ -20,22 +20,39 @@
 #include "BlockImpl.hpp"
 #include "DuplexPort.hpp"
 #include "ThreadManager.hpp"
+#include "types.hpp"
 
-#include "ingen/types.hpp"
+#include "ingen/Node.hpp"
+#include "lv2/urid/urid.h"
+#include "raul/Maid.hpp"
+
+#include <boost/intrusive/slist.hpp>
 
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <utility>
 
-namespace raul { class Maid; }
+namespace raul {
+class Symbol;
+} // namespace raul
+
+namespace boost {
+namespace intrusive {
+
+template <bool Enabled> struct constant_time_size;
+
+} // namespace intrusive
+} // namespace boost
 
 namespace ingen {
 namespace server {
 
 class ArcImpl;
+class BufferFactory;
 class CompiledGraph;
 class Engine;
+class PortImpl;
 class RunContext;
 
 /** A group of blocks in a graph, possibly polyphonic.
@@ -50,28 +67,28 @@ class GraphImpl final : public BlockImpl
 {
 public:
 	GraphImpl(Engine&             engine,
-	          const Raul::Symbol& symbol,
+	          const raul::Symbol& symbol,
 	          uint32_t            poly,
 	          GraphImpl*          parent,
 	          SampleRate          srate,
 	          uint32_t            internal_poly);
 
-	virtual ~GraphImpl();
+	~GraphImpl() override;
 
 	GraphType graph_type() const override { return GraphType::GRAPH; }
 
 	BlockImpl* duplicate(Engine&             engine,
-	                     const Raul::Symbol& symbol,
+	                     const raul::Symbol& symbol,
 	                     GraphImpl*          parent) override;
 
 	void activate(BufferFactory& bufs) override;
 	void deactivate() override;
 
-	void pre_process(RunContext& context) override;
-	void process(RunContext& context) override;
-	void run(RunContext& context) override;
+	void pre_process(RunContext& ctx) override;
+	void process(RunContext& ctx) override;
+	void run(RunContext& ctx) override;
 
-	void set_buffer_size(RunContext&    context,
+	void set_buffer_size(RunContext&    ctx,
 	                     BufferFactory& bufs,
 	                     LV2_URID       type,
 	                     uint32_t       size) override;
@@ -87,14 +104,14 @@ public:
 	 *
 	 * Audio thread.
 	 *
-	 * \param context Process context
+	 * \param ctx  Process context
 	 * \param bufs New set of buffers
 	 * \param poly Must be < the most recent value passed to prepare_internal_poly.
 	 * \param maid Any objects no longer needed will be pushed to this
 	 */
-	bool apply_internal_poly(RunContext&    context,
+	bool apply_internal_poly(RunContext&    ctx,
 	                         BufferFactory& bufs,
-	                         Raul::Maid&    maid,
+	                         raul::Maid&    maid,
 	                         uint32_t       poly);
 
 	// Graph specific stuff not inherited from Block
@@ -156,28 +173,29 @@ public:
 	/** Add an arc to this graph.
 	 * Pre-processing thread only.
 	 */
-	void add_arc(const SPtr<ArcImpl>& a);
+	void add_arc(const std::shared_ptr<ArcImpl>& a);
 
 	/** Remove an arc from this graph.
 	 * Pre-processing thread only.
 	 */
-	SPtr<ArcImpl> remove_arc(const PortImpl* tail, const PortImpl* dst_port);
+	std::shared_ptr<ArcImpl>
+	remove_arc(const PortImpl* tail, const PortImpl* dst_port);
 
 	bool has_arc(const PortImpl* tail, const PortImpl* dst_port) const;
 
 	/** Set a new compiled graph to run, and return the old one. */
-	void set_compiled_graph(MPtr<CompiledGraph>&& cg);
+	void set_compiled_graph(raul::managed_ptr<CompiledGraph>&& cg);
 
-	const MPtr<Ports>& external_ports() { return _ports; }
+	const raul::managed_ptr<Ports>& external_ports() { return _ports; }
 
-	void set_external_ports(MPtr<Ports>&& pa) { _ports = std::move(pa); }
+	void set_external_ports(raul::managed_ptr<Ports>&& pa) { _ports = std::move(pa); }
 
-	MPtr<Ports> build_ports_array(Raul::Maid& maid);
+	raul::managed_ptr<Ports> build_ports_array(raul::Maid& maid);
 
 	/** Whether to run this graph's DSP bits in the audio thread */
 	bool enabled() const { return _process; }
 	void enable() { _process = true; }
-	void disable(RunContext& context);
+	void disable(RunContext& ctx);
 
 	uint32_t internal_poly()         const { return _poly_pre; }
 	uint32_t internal_poly_process() const { return _poly_process; }
@@ -185,14 +203,14 @@ public:
 	Engine& engine() { return _engine; }
 
 private:
-	Engine&             _engine;
-	uint32_t            _poly_pre;        ///< Pre-process thread only
-	uint32_t            _poly_process;    ///< Process thread only
-	MPtr<CompiledGraph> _compiled_graph;  ///< Process thread only
-	PortList            _inputs;          ///< Pre-process thread only
-	PortList            _outputs;         ///< Pre-process thread only
-	Blocks              _blocks;          ///< Pre-process thread only
-	bool                _process;         ///< True iff graph is enabled
+	Engine&                          _engine;
+	uint32_t                         _poly_pre;     ///< Pre-process thread only
+	uint32_t                         _poly_process; ///< Process thread only
+	raul::managed_ptr<CompiledGraph> _compiled_graph; ///< Process thread only
+	PortList                         _inputs;  ///< Pre-process thread only
+	PortList                         _outputs; ///< Pre-process thread only
+	Blocks                           _blocks;  ///< Pre-process thread only
+	bool                             _process; ///< True iff graph is enabled
 };
 
 } // namespace server

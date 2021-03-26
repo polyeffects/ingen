@@ -17,18 +17,22 @@
 #ifndef INGEN_GUI_GRAPHVIEW_HPP
 #define INGEN_GUI_GRAPHVIEW_HPP
 
-#include "ingen/types.hpp"
-
 #include <gtkmm/box.h>
-#include <gtkmm/builder.h>
-#include <gtkmm/scrolledwindow.h>
-#include <gtkmm/spinbutton.h>
-#include <gtkmm/toggletoolbutton.h>
-#include <gtkmm/toolbar.h>
-#include <gtkmm/toolitem.h>
-#include <gtkmm/toolitem.h>
 
-namespace Raul { class Atom; }
+#include <memory>
+
+namespace Glib {
+template <class T> class RefPtr;
+} // namespace Glib
+
+namespace Gtk {
+class Builder;
+class ScrolledWindow;
+class SpinButton;
+class ToggleToolButton;
+class ToolItem;
+class Toolbar;
+} // namespace Gtk
 
 namespace ingen {
 
@@ -36,20 +40,13 @@ class Atom;
 class URI;
 
 namespace client {
-class PortModel;
-class MetadataModel;
 class GraphModel;
-class ObjectModel;
-}
+} // namespace client
 
 namespace gui {
 
 class App;
-class LoadPluginWindow;
-class NewSubgraphWindow;
 class GraphCanvas;
-class GraphDescriptionWindow;
-class SubgraphModule;
 
 /** The graph specific contents of a GraphWindow (ie the canvas and whatever else).
  *
@@ -61,19 +58,23 @@ public:
 	GraphView(BaseObjectType*                   cobject,
 	          const Glib::RefPtr<Gtk::Builder>& xml);
 
-	~GraphView();
+	~GraphView() override;
 
 	void init(App& app);
 
-	SPtr<GraphCanvas>              canvas()               const { return _canvas; }
-	SPtr<const client::GraphModel> graph()                const { return _graph; }
-	Gtk::ToolItem*                 breadcrumb_container() const { return _breadcrumb_container; }
+	std::shared_ptr<GraphCanvas>              canvas() const { return _canvas; }
+	std::shared_ptr<const client::GraphModel> graph() const { return _graph; }
 
-	static SPtr<GraphView>
-	create(App& app, const SPtr<const client::GraphModel>& graph);
+	Gtk::ToolItem* breadcrumb_container() const
+	{
+		return _breadcrumb_container;
+	}
+
+	static std::shared_ptr<GraphView>
+	create(App& app, const std::shared_ptr<const client::GraphModel>& graph);
 
 private:
-	void set_graph(const SPtr<const client::GraphModel>& graph);
+	void set_graph(const std::shared_ptr<const client::GraphModel>& graph);
 
 	void process_toggled();
 	void poly_changed();
@@ -81,18 +82,18 @@ private:
 
 	void property_changed(const URI& predicate, const Atom& value);
 
-	App* _app;
+	App* _app = nullptr;
 
-	SPtr<const client::GraphModel> _graph;
-	SPtr<GraphCanvas>              _canvas;
+	std::shared_ptr<const client::GraphModel> _graph;
+	std::shared_ptr<GraphCanvas>              _canvas;
 
-	Gtk::ScrolledWindow*   _canvas_scrolledwindow;
-	Gtk::Toolbar*          _toolbar;
-	Gtk::ToggleToolButton* _process_but;
-	Gtk::SpinButton*       _poly_spin;
-	Gtk::ToolItem*         _breadcrumb_container;
+	Gtk::ScrolledWindow*   _canvas_scrolledwindow = nullptr;
+	Gtk::Toolbar*          _toolbar = nullptr;
+	Gtk::ToggleToolButton* _process_but = nullptr;
+	Gtk::SpinButton*       _poly_spin = nullptr;
+	Gtk::ToolItem*         _breadcrumb_container = nullptr;
 
-	bool _enable_signal;
+	bool _enable_signal = true;
 };
 
 } // namespace gui

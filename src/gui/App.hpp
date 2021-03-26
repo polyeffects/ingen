@@ -17,47 +17,50 @@
 #ifndef INGEN_GUI_APP_HPP
 #define INGEN_GUI_APP_HPP
 
-#include "ingen/Atom.hpp"
 #include "ingen/Message.hpp"
+#include "ingen/Properties.hpp"
 #include "ingen/Resource.hpp"
 #include "ingen/Status.hpp"
+#include "ingen/URI.hpp"
 #include "ingen/World.hpp"
 #include "ingen/ingen.h"
-#include "ingen/types.hpp"
 #include "lilv/lilv.h"
-#include "raul/Deletable.hpp"
 
-#include <gtkmm/aboutdialog.h>
-#include <gtkmm/main.h>
-#include <gtkmm/window.h>
+#include <sigc++/signal.h>
 
-#include <unordered_map>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <unordered_map>
+
+namespace Gtk {
+class AboutDialog;
+class Main;
+class Widget;
+class Window;
+} // namespace Gtk
 
 namespace ingen {
 
+class Atom;
+class Forge;
 class Interface;
 class Log;
-class Port;
 class Serialiser;
 class StreamWriter;
-class World;
+class URIs;
 
 namespace client {
 
 class ClientStore;
-class GraphModel;
-class PluginModel;
 class PortModel;
 class SigClientInterface;
 
-}
+} // namespace client
 
 namespace gui {
 
 class ConnectWindow;
-class GraphCanvas;
-class GraphTreeView;
 class GraphTreeWindow;
 class MessagesWindow;
 class Port;
@@ -75,7 +78,7 @@ public:
 
 	void error_message(const std::string& str);
 
-	void attach(SPtr<ingen::Interface> client);
+	void attach(const std::shared_ptr<ingen::Interface>& client);
 
 	void detach();
 
@@ -118,17 +121,17 @@ public:
 	Style*           style()           const { return _style; }
 	WindowFactory*   window_factory()  const { return _window_factory; }
 
-	ingen::Forge&             forge()     const { return _world.forge(); }
-	SPtr<ingen::Interface>    interface() const { return _world.interface(); }
-	SPtr<ingen::Interface>    client()    const { return _client; }
-	SPtr<client::ClientStore> store()     const { return _store; }
-	SPtr<ThreadedLoader>      loader()    const { return _loader; }
+	ingen::Forge&                        forge()     const { return _world.forge(); }
+	std::shared_ptr<ingen::Interface>    interface() const { return _world.interface(); }
+	std::shared_ptr<ingen::Interface>    client()    const { return _client; }
+	std::shared_ptr<client::ClientStore> store()     const { return _store; }
+	std::shared_ptr<ThreadedLoader>      loader()    const { return _loader; }
 
-	SPtr<client::SigClientInterface> sig_client();
+	std::shared_ptr<client::SigClientInterface> sig_client();
 
-	SPtr<Serialiser> serialiser();
+	std::shared_ptr<Serialiser> serialiser();
 
-	static SPtr<App> create(ingen::World& world);
+	static std::shared_ptr<App> create(ingen::World& world);
 
 	void run();
 
@@ -159,18 +162,18 @@ protected:
 
 	static Gtk::Main* _main;
 
-	SPtr<ingen::Interface>    _client;
-	SPtr<client::ClientStore> _store;
-	SPtr<ThreadedLoader>      _loader;
-	SPtr<StreamWriter>        _dumper;
+	std::shared_ptr<ingen::Interface>    _client;
+	std::shared_ptr<client::ClientStore> _store;
+	std::shared_ptr<ThreadedLoader>      _loader;
+	std::shared_ptr<StreamWriter>        _dumper;
 
 	Style* _style;
 
-	ConnectWindow*    _connect_window;
-	MessagesWindow*   _messages_window;
-	GraphTreeWindow*  _graph_tree_window;
-	Gtk::AboutDialog* _about_dialog;
-	WindowFactory*    _window_factory;
+	ConnectWindow*    _connect_window = nullptr;
+	MessagesWindow*   _messages_window = nullptr;
+	GraphTreeWindow*  _graph_tree_window = nullptr;
+	Gtk::AboutDialog* _about_dialog = nullptr;
+	WindowFactory*    _window_factory = nullptr;
 
 	ingen::World& _world;
 

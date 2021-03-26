@@ -18,18 +18,28 @@
 #define INGEN_EVENTS_CREATEGRAPH_HPP
 
 #include "ClientUpdate.hpp"
-#include "CompiledGraph.hpp"
 #include "Event.hpp"
+#include "types.hpp"
 
-#include "ingen/types.hpp"
+#include "ingen/Properties.hpp"
+#include "raul/Maid.hpp"
+#include "raul/Path.hpp"
 
 #include <cstdint>
 #include <list>
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+
 namespace server {
 
+class CompiledGraph;
+class Engine;
 class GraphImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -40,15 +50,17 @@ namespace events {
 class CreateGraph : public Event
 {
 public:
-	CreateGraph(Engine&                engine,
-	            const SPtr<Interface>& client,
-	            int32_t                id,
-	            SampleCount            timestamp,
-	            const Raul::Path&      path,
-	            const Properties&      properties);
+	CreateGraph(Engine&                           engine,
+	            const std::shared_ptr<Interface>& client,
+	            int32_t                           id,
+	            SampleCount                       timestamp,
+	            raul::Path                        path,
+	            const Properties&                 properties);
+
+	~CreateGraph() override;
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
@@ -57,13 +69,13 @@ public:
 private:
 	void build_child_events();
 
-	const Raul::Path       _path;
-	Properties             _properties;
-	ClientUpdate           _update;
-	GraphImpl*             _graph;
-	GraphImpl*             _parent;
-	MPtr<CompiledGraph>    _compiled_graph;
-	std::list<UPtr<Event>> _child_events;
+	const raul::Path                  _path;
+	Properties                        _properties;
+	ClientUpdate                      _update;
+	GraphImpl*                        _graph;
+	GraphImpl*                        _parent;
+	raul::managed_ptr<CompiledGraph>  _compiled_graph;
+	std::list<std::unique_ptr<Event>> _child_events;
 };
 
 } // namespace events

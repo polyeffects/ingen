@@ -26,6 +26,7 @@
 #include "lv2/urid/urid.h"
 
 #include <algorithm>
+#include <memory>
 
 namespace ingen {
 namespace server {
@@ -45,10 +46,14 @@ BufferFactory::BufferFactory(Engine& engine, URIs& uris)
 BufferFactory::~BufferFactory()
 {
 	_silent_buffer.reset();
-	free_list(_free_audio.load());
-	free_list(_free_control.load());
-	free_list(_free_sequence.load());
-	free_list(_free_object.load());
+
+	// Run twice to delete value buffer references which are dropped
+	for (unsigned i = 0; i < 2; ++i) {
+		free_list(_free_audio.exchange(nullptr));
+		free_list(_free_control.exchange(nullptr));
+		free_list(_free_sequence.exchange(nullptr));
+		free_list(_free_object.exchange(nullptr));
+	}
 }
 
 Forge&
@@ -57,7 +62,7 @@ BufferFactory::forge()
 	return _engine.world().forge();
 }
 
-Raul::Maid&
+raul::Maid&
 BufferFactory::maid()
 {
 	return *_engine.maid();
@@ -116,7 +121,7 @@ BufferFactory::try_get_buffer(LV2_URID type)
 {
 	std::atomic<Buffer*>& head_ptr = free_list(type);
 	Buffer*               head     = nullptr;
-	Buffer*               next;
+	Buffer*               next     = nullptr;
 	do {
 		head = head_ptr.load();
 		if (!head) {
@@ -170,7 +175,8 @@ BufferFactory::create(LV2_URID type, LV2_URID value_type, uint32_t capacity)
 	if (capacity == 0) {
 		capacity = default_size(type);
 	} else if (type == _uris.atom_Float) {
-		capacity = std::max(capacity, (uint32_t)sizeof(LV2_Atom_Float));
+		capacity =
+		    std::max(capacity, static_cast<uint32_t>(sizeof(LV2_Atom_Float)));
 	} else if (type == _uris.atom_Sound) {
 		capacity = std::max(capacity, default_size(_uris.atom_Sound));
 	}
@@ -182,7 +188,7 @@ void
 BufferFactory::recycle(Buffer* buf)
 {
 	std::atomic<Buffer*>& head_ptr = free_list(buf->type());
-	Buffer* try_head;
+	Buffer*               try_head = nullptr;
 	do {
 		try_head = head_ptr.load();
 		buf->_next = try_head;

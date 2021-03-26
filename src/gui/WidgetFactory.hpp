@@ -14,16 +14,14 @@
   along with Ingen.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef INGEN_GUI_GLADEFACTORY_HPP
-#define INGEN_GUI_GLADEFACTORY_HPP
+#ifndef INGEN_GUI_WIDGETFACTORY_HPP
+#define INGEN_GUI_WIDGETFACTORY_HPP
 
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
-#include <gtkmm/builder.h>
+#include <gtkmm/builder.h> // IWYU pragma: keep
 
 #include <string>
-
-namespace Gtk { class Builder; }
 
 namespace ingen {
 namespace gui {
@@ -58,4 +56,4 @@ private:
 } // namespace gui
 } // namespace ingen
 
-#endif // INGEN_GUI_GLADEFACTORY_HPP
+#endif // INGEN_GUI_WIDGETFACTORY_HPP

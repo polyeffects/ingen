@@ -19,6 +19,19 @@
 #include "App.hpp"
 #include "RDFS.hpp"
 
+#include "ingen/World.hpp"
+
+#include <gdk/gdk.h>
+#include <glibmm/helperlist.h>
+#include <gtkmm/button.h>
+#include <gtkmm/menu.h>
+#include <gtkmm/menu_elems.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/menushell.h>
+#include <gtkmm/object.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+
 #include <map>
 #include <utility>
 
@@ -46,7 +59,7 @@ URIEntry::build_value_menu()
 {
 	World&     world  = _app->world();
 	LilvWorld* lworld = world.lilv_world();
-	Gtk::Menu* menu   = new Gtk::Menu();
+	auto*      menu   = new Gtk::Menu();
 
 	LilvNode* owl_onDatatype  = lilv_new_uri(lworld, LILV_NS_OWL "onDatatype");
 	LilvNode* rdf_type        = lilv_new_uri(lworld, LILV_NS_RDF "type");
@@ -110,7 +123,7 @@ URIEntry::build_subclass_menu(const LilvNode* klass)
 		return nullptr;
 	}
 
-	Gtk::Menu* menu = new Gtk::Menu();
+	auto* menu = new Gtk::Menu();
 
 	// Add "header" item for choosing this class itself
 	add_leaf_menu_item(menu, klass, rdfs::label(world, klass));

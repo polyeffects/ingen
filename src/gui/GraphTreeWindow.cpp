@@ -16,24 +16,47 @@
 
 #include "App.hpp"
 #include "GraphTreeWindow.hpp"
-#include "SubgraphModule.hpp"
+#include "Window.hpp"
 #include "WindowFactory.hpp"
+
+#include "ingen/Atom.hpp"
+#include "ingen/Forge.hpp"
 #include "ingen/Interface.hpp"
 #include "ingen/Log.hpp"
+#include "ingen/URIs.hpp"
 #include "ingen/client/ClientStore.hpp"
 #include "ingen/client/GraphModel.hpp"
 #include "raul/Path.hpp"
+#include "raul/Symbol.hpp"
+
+#include <glibmm/propertyproxy.h>
+#include <glibmm/signalproxy.h>
+#include <gtkmm/builder.h>
+#include <gtkmm/cellrenderer.h>
+#include <gtkmm/cellrenderertoggle.h>
+#include <gtkmm/object.h>
+#include <gtkmm/treeiter.h>
+#include <gtkmm/treepath.h>
+#include <gtkmm/treeviewcolumn.h>
+#include <sigc++/adaptors/bind.h>
+#include <sigc++/functors/mem_fun.h>
+#include <sigc++/signal.h>
+
+#include <cassert>
+#include <cstdint>
+#include <memory>
 
 namespace ingen {
 
-using namespace client;
+using client::GraphModel;
+using client::ObjectModel;
 
 namespace gui {
 
 GraphTreeWindow::GraphTreeWindow(BaseObjectType*                   cobject,
                                  const Glib::RefPtr<Gtk::Builder>& xml)
 	: Window(cobject)
-	, _app(nullptr)
+	, _graphs_treeview(nullptr)
 	, _enable_signal(true)
 {
 	xml->get_widget_derived("graphs_treeview", _graphs_treeview);
@@ -50,7 +73,7 @@ GraphTreeWindow::GraphTreeWindow(BaseObjectType*                   cobject,
 
 	_graphs_treeview->append_column(*name_col);
 	_graphs_treeview->append_column(*enabled_col);
-	Gtk::CellRendererToggle* enabled_renderer = dynamic_cast<Gtk::CellRendererToggle*>(
+	auto* enabled_renderer = dynamic_cast<Gtk::CellRendererToggle*>(
 		_graphs_treeview->get_column_cell_renderer(1));
 	enabled_renderer->property_activatable() = true;
 
@@ -65,24 +88,24 @@ GraphTreeWindow::GraphTreeWindow(BaseObjectType*                   cobject,
 }
 
 void
-GraphTreeWindow::init(App& app, ClientStore& store)
+GraphTreeWindow::init(App& app, client::ClientStore& store)
 {
-	_app = &app;
+	init_window(app);
 	store.signal_new_object().connect(
 		sigc::mem_fun(this, &GraphTreeWindow::new_object));
 }
 
 void
-GraphTreeWindow::new_object(const SPtr<ObjectModel>& object)
+GraphTreeWindow::new_object(const std::shared_ptr<ObjectModel>& object)
 {
-	SPtr<GraphModel> graph = dynamic_ptr_cast<GraphModel>(object);
+	auto graph = std::dynamic_pointer_cast<GraphModel>(object);
 	if (graph) {
 		add_graph(graph);
 	}
 }
 
 void
-GraphTreeWindow::add_graph(const SPtr<GraphModel>& pm)
+GraphTreeWindow::add_graph(const std::shared_ptr<GraphModel>& pm)
 {
 	if (!pm->parent()) {
 		Gtk::TreeModel::iterator iter = _graph_treestore->append();
@@ -123,7 +146,7 @@ GraphTreeWindow::add_graph(const SPtr<GraphModel>& pm)
 }
 
 void
-GraphTreeWindow::remove_graph(const SPtr<GraphModel>& pm)
+GraphTreeWindow::remove_graph(const std::shared_ptr<GraphModel>& pm)
 {
 	Gtk::TreeModel::iterator i = find_graph(_graph_treestore->children(), pm);
 	if (i != _graph_treestore->children().end()) {
@@ -132,11 +155,11 @@ GraphTreeWindow::remove_graph(const SPtr<GraphModel>& pm)
 }
 
 Gtk::TreeModel::iterator
-GraphTreeWindow::find_graph(Gtk::TreeModel::Children         root,
-                            const SPtr<client::ObjectModel>& graph)
+GraphTreeWindow::find_graph(Gtk::TreeModel::Children                    root,
+                            const std::shared_ptr<client::ObjectModel>& graph)
 {
 	for (Gtk::TreeModel::iterator c = root.begin(); c != root.end(); ++c) {
-		SPtr<GraphModel> pm = (*c)[_graph_tree_columns.graph_model_col];
+		std::shared_ptr<GraphModel> pm = (*c)[_graph_tree_columns.graph_model_col];
 		if (graph == pm) {
 			return c;
 		} else if (!(*c)->children().empty()) {
@@ -156,8 +179,8 @@ GraphTreeWindow::show_graph_menu(GdkEventButton* ev)
 {
 	Gtk::TreeModel::iterator active = _graph_tree_selection->get_selected();
 	if (active) {
-		Gtk::TreeModel::Row row = *active;
-		SPtr<GraphModel> pm = row[_graph_tree_columns.graph_model_col];
+		Gtk::TreeModel::Row         row = *active;
+		std::shared_ptr<GraphModel> pm  = row[_graph_tree_columns.graph_model_col];
 		if (pm) {
 			_app->log().warn("TODO: graph menu from tree window");
 		}
@@ -168,9 +191,9 @@ void
 GraphTreeWindow::event_graph_activated(const Gtk::TreeModel::Path& path,
                                        Gtk::TreeView::Column*      col)
 {
-	Gtk::TreeModel::iterator active = _graph_treestore->get_iter(path);
-	Gtk::TreeModel::Row row = *active;
-	SPtr<GraphModel> pm = row[_graph_tree_columns.graph_model_col];
+	Gtk::TreeModel::iterator    active = _graph_treestore->get_iter(path);
+	Gtk::TreeModel::Row         row    = *active;
+	std::shared_ptr<GraphModel> pm     = row[_graph_tree_columns.graph_model_col];
 
 	_app->window_factory()->present_graph(pm);
 }
@@ -178,24 +201,25 @@ GraphTreeWindow::event_graph_activated(const Gtk::TreeModel::Path& path,
 void
 GraphTreeWindow::event_graph_enabled_toggled(const Glib::ustring& path_str)
 {
-	Gtk::TreeModel::Path path(path_str);
+	Gtk::TreeModel::Path     path(path_str);
 	Gtk::TreeModel::iterator active = _graph_treestore->get_iter(path);
-	Gtk::TreeModel::Row row = *active;
+	Gtk::TreeModel::Row      row    = *active;
 
-	SPtr<GraphModel> pm = row[_graph_tree_columns.graph_model_col];
+	std::shared_ptr<GraphModel> pm = row[_graph_tree_columns.graph_model_col];
 	assert(pm);
 
 	if (_enable_signal) {
 		_app->set_property(pm->uri(),
 		                   _app->uris().ingen_enabled,
-		                   _app->forge().make((bool)!pm->enabled()));
+		                   _app->forge().make(static_cast<bool>(!pm->enabled())));
 	}
 }
 
 void
-GraphTreeWindow::graph_property_changed(const URI&              key,
-                                        const Atom&             value,
-                                        const SPtr<GraphModel>& graph)
+GraphTreeWindow::graph_property_changed(
+    const URI&                         key,
+    const Atom&                        value,
+    const std::shared_ptr<GraphModel>& graph)
 {
 	const URIs& uris = _app->uris();
 	_enable_signal = false;
@@ -212,7 +236,7 @@ GraphTreeWindow::graph_property_changed(const URI&              key,
 }
 
 void
-GraphTreeWindow::graph_moved(const SPtr<GraphModel>& graph)
+GraphTreeWindow::graph_moved(const std::shared_ptr<GraphModel>& graph)
 {
 	_enable_signal = false;
 

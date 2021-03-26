@@ -20,14 +20,21 @@
 #include "types.hpp"
 
 #include "ingen/Interface.hpp"
-#include "ingen/Node.hpp"
 #include "ingen/Status.hpp"
-#include "ingen/types.hpp"
+#include "ingen/URI.hpp"
+#include "ingen/paths.hpp"
 #include "raul/Deletable.hpp"
 #include "raul/Noncopyable.hpp"
-#include "raul/Path.hpp"
 
 #include <atomic>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+
+namespace raul {
+class Path;
+} // namespace raul
 
 namespace ingen {
 namespace server {
@@ -48,7 +55,7 @@ class PreProcessContext;
  *
  * \ingroup engine
  */
-class Event : public Raul::Deletable, public Raul::Noncopyable
+class Event : public raul::Deletable, public raul::Noncopyable
 {
 public:
 	/** Event mode to distinguish normal events from undo events. */
@@ -62,11 +69,14 @@ public:
 		UNBLOCK  ///< Finish atomic executed block of events
 	};
 
+	/** Claim position in undo stack before pre-processing (non-realtime). */
+	virtual void mark(PreProcessContext&) {}
+
 	/** Pre-process event before execution (non-realtime). */
 	virtual bool pre_process(PreProcessContext& ctx) = 0;
 
 	/** Execute this event in the audio thread (realtime). */
-	virtual void execute(RunContext& context) = 0;
+	virtual void execute(RunContext& ctx) = 0;
 
 	/** Post-process event after execution (non-realtime). */
 	virtual void post_process() = 0;
@@ -104,17 +114,14 @@ public:
 	inline Engine& engine() { return _engine; }
 
 protected:
-	Event(Engine&                engine,
-	      const SPtr<Interface>& client,
-	      int32_t                id,
-	      FrameTime              time)
-		: _engine(engine)
-		, _next(nullptr)
-		, _request_client(std::move(client))
-		, _request_id(id)
-		, _time(time)
-		, _status(Status::NOT_PREPARED)
-		, _mode(Mode::NORMAL)
+	Event(Engine& engine, std::shared_ptr<Interface> client, int32_t id, FrameTime time)
+	    : _engine(engine)
+	    , _next(nullptr)
+	    , _request_client(std::move(client))
+	    , _request_id(id)
+	    , _time(time)
+	    , _status(Status::NOT_PREPARED)
+	    , _mode(Mode::NORMAL)
 	{}
 
 	/** Constructor for internal events only */
@@ -137,7 +144,7 @@ protected:
 		return pre_process_done(st);
 	}
 
-	inline bool pre_process_done(Status st, const Raul::Path& subject) {
+	inline bool pre_process_done(Status st, const raul::Path& subject) {
 		return pre_process_done(st, path_to_uri(subject));
 	}
 
@@ -149,14 +156,14 @@ protected:
 		return _status;
 	}
 
-	Engine&             _engine;
-	std::atomic<Event*> _next;
-	SPtr<Interface>     _request_client;
-	int32_t             _request_id;
-	FrameTime           _time;
-	Status              _status;
-	std::string         _err_subject;
-	Mode                _mode;
+	Engine&                    _engine;
+	std::atomic<Event*>        _next;
+	std::shared_ptr<Interface> _request_client;
+	int32_t                    _request_id;
+	FrameTime                  _time;
+	Status                     _status;
+	std::string                _err_subject;
+	Mode                       _mode;
 };
 
 } // namespace server

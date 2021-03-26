@@ -18,16 +18,28 @@
 #define INGEN_EVENTS_CREATEBLOCK_HPP
 
 #include "ClientUpdate.hpp"
-#include "CompiledGraph.hpp"
 #include "Event.hpp"
+#include "types.hpp"
+
+#include "raul/Maid.hpp"
+#include "raul/Path.hpp"
 
 #include <cstdint>
+#include <memory>
 
 namespace ingen {
+
+class Interface;
+class Properties;
+
 namespace server {
 
 class BlockImpl;
+class CompiledGraph;
+class Engine;
 class GraphImpl;
+class PreProcessContext;
+class RunContext;
 
 namespace events {
 
@@ -38,25 +50,27 @@ namespace events {
 class CreateBlock : public Event
 {
 public:
-	CreateBlock(Engine&                engine,
-	            const SPtr<Interface>& client,
-	            int32_t                id,
-	            SampleCount            timestamp,
-	            const Raul::Path&      path,
-	            Properties&            properties);
+	CreateBlock(Engine&                           engine,
+	            const std::shared_ptr<Interface>& client,
+	            int32_t                           id,
+	            SampleCount                       timestamp,
+	            raul::Path                        path,
+	            Properties&                       properties);
+
+	~CreateBlock() override;
 
 	bool pre_process(PreProcessContext& ctx) override;
-	void execute(RunContext& context) override;
+	void execute(RunContext& ctx) override;
 	void post_process() override;
 	void undo(Interface& target) override;
 
 private:
-	Raul::Path          _path;
-	Properties&         _properties;
-	ClientUpdate        _update;
-	GraphImpl*          _graph;
-	BlockImpl*          _block;
-	MPtr<CompiledGraph> _compiled_graph;
+	raul::Path                       _path;
+	Properties&                      _properties;
+	ClientUpdate                     _update;
+	GraphImpl*                       _graph;
+	BlockImpl*                       _block;
+	raul::managed_ptr<CompiledGraph> _compiled_graph;
 };
 
 } // namespace events

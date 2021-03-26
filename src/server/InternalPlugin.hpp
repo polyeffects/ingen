@@ -17,11 +17,11 @@
 #ifndef INGEN_ENGINE_INTERNALPLUGIN_HPP
 #define INGEN_ENGINE_INTERNALPLUGIN_HPP
 
+#include "PluginImpl.hpp"
+
 #include "ingen/URI.hpp"
 #include "lilv/lilv.h"
 #include "raul/Symbol.hpp"
-
-#include "PluginImpl.hpp"
 
 #define NS_INTERNALS "http://drobilla.net/ns/ingen-internals#"
 
@@ -41,21 +41,19 @@ class GraphImpl;
 class InternalPlugin : public PluginImpl
 {
 public:
-	InternalPlugin(URIs&               uris,
-	               const URI&          uri,
-	               const Raul::Symbol& symbol);
+	InternalPlugin(URIs& uris, const URI& uri, raul::Symbol symbol);
 
 	BlockImpl* instantiate(BufferFactory&      bufs,
-	                       const Raul::Symbol& symbol,
+	                       const raul::Symbol& symbol,
 	                       bool                polyphonic,
 	                       GraphImpl*          parent,
 	                       Engine&             engine,
 	                       const LilvState*    state) override;
 
-	Raul::Symbol symbol() const override { return _symbol; }
+	raul::Symbol symbol() const override { return _symbol; }
 
 private:
-	const Raul::Symbol _symbol;
+	const raul::Symbol _symbol;
 };
 
 } // namespace server

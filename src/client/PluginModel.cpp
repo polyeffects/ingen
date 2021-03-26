@@ -17,16 +17,15 @@
 #include "ingen/client/PluginModel.hpp"
 
 #include "ingen/Atom.hpp"
-#include "ingen/client/GraphModel.hpp"
 #include "ingen/client/PluginUI.hpp"
-#include "raul/Path.hpp"
-#include "ingen_config.h"
+#include "lv2/core/lv2.h"
 
 #include <boost/optional/optional.hpp>
 
 #include <cctype>
 #include <cstring>
 #include <iosfwd>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -50,9 +49,9 @@ PluginModel::PluginModel(URIs&             uris,
 {
 	if (!_type.is_valid()) {
 		if (uri.string().find("ingen-internals") != string::npos) {
-			_type = uris.ingen_Internal.urid;
+			_type = uris.ingen_Internal.urid_atom();
 		} else {
-			_type = uris.lv2_Plugin.urid;  // Assume LV2 and hope for the best...
+			_type = uris.lv2_Plugin.urid_atom();  // Assume LV2 and hope for the best...
 		}
 	}
 
@@ -112,7 +111,7 @@ PluginModel::get_property(const URI& key) const
 		}
 		str = str.substr(last_delim + 1);
 
-		std::string symbol = Raul::Symbol::symbolify(str);
+		std::string symbol = raul::Symbol::symbolify(str);
 		set_property(_uris.lv2_symbol, _uris.forge.alloc(symbol));
 		return get_property(key);
 	}
@@ -123,22 +122,22 @@ PluginModel::get_property(const URI& key) const
 		LilvNodes* values   = lilv_plugin_get_value(_lilv_plugin, lv2_pred);
 		lilv_node_free(lv2_pred);
 		LILV_FOREACH(nodes, i, values) {
-			const LilvNode* val = lilv_nodes_get(values, i);
-			if (lilv_node_is_uri(val)) {
+			const LilvNode* value = lilv_nodes_get(values, i);
+			if (lilv_node_is_uri(value)) {
 				ret = set_property(
-					key, _uris.forge.make_urid(URI(lilv_node_as_uri(val))));
+					key, _uris.forge.make_urid(URI(lilv_node_as_uri(value))));
 				break;
-			} else if (lilv_node_is_string(val)) {
+			} else if (lilv_node_is_string(value)) {
 				ret = set_property(
-					key, _uris.forge.alloc(lilv_node_as_string(val)));
+					key, _uris.forge.alloc(lilv_node_as_string(value)));
 				break;
-			} else if (lilv_node_is_float(val)) {
+			} else if (lilv_node_is_float(value)) {
 				ret = set_property(
-					key, _uris.forge.make(lilv_node_as_float(val)));
+					key, _uris.forge.make(lilv_node_as_float(value)));
 				break;
-			} else if (lilv_node_is_int(val)) {
+			} else if (lilv_node_is_int(value)) {
 				ret = set_property(
-					key, _uris.forge.make(lilv_node_as_int(val)));
+					key, _uris.forge.make(lilv_node_as_int(value)));
 				break;
 			}
 		}
@@ -153,7 +152,7 @@ PluginModel::get_property(const URI& key) const
 }
 
 void
-PluginModel::set(SPtr<PluginModel> p)
+PluginModel::set(const std::shared_ptr<PluginModel>& p)
 {
 	_type = p->_type;
 
@@ -161,7 +160,7 @@ PluginModel::set(SPtr<PluginModel> p)
 		_lilv_plugin = p->_lilv_plugin;
 	}
 
-	for (auto v : p->properties()) {
+	for (const auto& v : p->properties()) {
 		Resource::set_property(v.first, v.second);
 		_signal_property.emit(v.first, v.second);
 	}
@@ -176,14 +175,14 @@ PluginModel::add_preset(const URI& uri, const std::string& label)
 	_signal_preset.emit(uri, label);
 }
 
-Raul::Symbol
+raul::Symbol
 PluginModel::default_block_symbol() const
 {
 	const Atom& name_atom = get_property(_uris.lv2_symbol);
 	if (name_atom.is_valid() && name_atom.type() == _uris.forge.String) {
-		return Raul::Symbol::symbolify(name_atom.ptr<char>());
+		return raul::Symbol::symbolify(name_atom.ptr<char>());
 	} else {
-		return Raul::Symbol("_");
+		return raul::Symbol("_");
 	}
 }
 
@@ -199,12 +198,12 @@ PluginModel::human_name() const
 }
 
 string
-PluginModel::port_human_name(uint32_t i) const
+PluginModel::port_human_name(const uint32_t index) const
 {
 	if (_lilv_plugin) {
-		const LilvPort* port = lilv_plugin_get_port_by_index(_lilv_plugin, i);
+		const LilvPort* port = lilv_plugin_get_port_by_index(_lilv_plugin, index);
 		LilvNode*       name = lilv_port_get_name(_lilv_plugin, port);
-		const string    ret(lilv_node_as_string(name));
+		string          ret(lilv_node_as_string(name));
 		lilv_node_free(name);
 		return ret;
 	}
@@ -212,12 +211,12 @@ PluginModel::port_human_name(uint32_t i) const
 }
 
 PluginModel::ScalePoints
-PluginModel::port_scale_points(uint32_t i) const
+PluginModel::port_scale_points(const uint32_t index) const
 {
 	// TODO: Non-float scale points
 	ScalePoints points;
 	if (_lilv_plugin) {
-		const LilvPort*  port = lilv_plugin_get_port_by_index(_lilv_plugin, i);
+		const LilvPort*  port = lilv_plugin_get_port_by_index(_lilv_plugin, index);
 		LilvScalePoints* sp   = lilv_port_get_scale_points(_lilv_plugin, port);
 		LILV_FOREACH(scale_points, i, sp) {
 			const LilvScalePoint* p = lilv_scale_points_get(sp, i);
@@ -241,12 +240,12 @@ PluginModel::has_ui() const
 	return false;
 }
 
-SPtr<PluginUI>
-PluginModel::ui(ingen::World&          world,
-                SPtr<const BlockModel> block) const
+std::shared_ptr<PluginUI>
+PluginModel::ui(ingen::World&                            world,
+                const std::shared_ptr<const BlockModel>& block) const
 {
 	if (!_lilv_plugin) {
-		return SPtr<PluginUI>();
+		return nullptr;
 	}
 
 	return PluginUI::create(world, block, _lilv_plugin);
@@ -274,7 +273,7 @@ link(const std::string& addr, bool html)
 }
 
 std::string
-PluginModel::get_documentation(const LilvNode* subject, bool html) const
+PluginModel::get_documentation(const LilvNode* subject, bool html)
 {
 	std::string doc;
 

@@ -27,17 +27,15 @@
 #include <map>
 #include <utility>
 
-namespace Raul { class Symbol; }
-
 namespace ingen {
 namespace server {
 
 NodeImpl::NodeImpl(const ingen::URIs&  uris,
                    NodeImpl*           parent,
-                   const Raul::Symbol& symbol)
-	: Node(uris, parent ? parent->path().child(symbol) : Raul::Path("/"))
+                   const raul::Symbol& symbol)
+	: Node(uris, parent ? parent->path().child(symbol) : raul::Path("/"))
 	, _parent(parent)
-	, _path(parent ? parent->path().child(symbol) : Raul::Path("/"))
+	, _path(parent ? parent->path().child(symbol) : raul::Path("/"))
 	, _symbol(symbol)
 {
 }
@@ -54,7 +52,7 @@ NodeImpl::get_property(const URI& key) const
 GraphImpl*
 NodeImpl::parent_graph() const
 {
-	return dynamic_cast<GraphImpl*>((BlockImpl*)_parent);
+	return dynamic_cast<GraphImpl*>(reinterpret_cast<BlockImpl*>(_parent));
 }
 
 } // namespace server

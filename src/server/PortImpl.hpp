@@ -17,6 +17,7 @@
 #ifndef INGEN_ENGINE_PORTIMPL_HPP
 #define INGEN_ENGINE_PORTIMPL_HPP
 
+#include "BufferFactory.hpp"
 #include "BufferRef.hpp"
 #include "NodeImpl.hpp"
 #include "PortType.hpp"
@@ -24,13 +25,26 @@
 #include "types.hpp"
 
 #include "ingen/Atom.hpp"
+#include "ingen/Node.hpp"
+#include "ingen/URIs.hpp"
+#include "ingen/ingen.h"
+#include "lv2/urid/urid.h"
 #include "raul/Array.hpp"
+#include "raul/Maid.hpp"
 
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <utility>
+
+namespace raul {
+class Symbol;
+} // namespace raul
 
 namespace ingen {
+
+class Properties;
+
 namespace server {
 
 class BlockImpl;
@@ -61,19 +75,19 @@ public:
 			SET
 		};
 
-		SetState() : state(State::SET), value(0), time(0) {}
+		SetState() = default;
 
-		void set(const RunContext& context, FrameTime t, Sample v) {
+		void set(const RunContext& ctx, FrameTime t, Sample v) {
 			time  = t;
 			value = v;
-			state = (time == context.start()
+			state = (time == ctx.start()
 			         ? State::SET
 			         : State::HALF_SET_CYCLE_1);
 		}
 
-		State     state;  ///< State of buffer for setting control value
-		Sample    value;  ///< Value currently being set
-		FrameTime time;   ///< Time value was set
+		State     state = State::SET; ///< State for setting control value
+		Sample    value = 0;          ///< Value currently being set
+		FrameTime time  = 0;          ///< Time value was set
 	};
 
 	struct Voice {
@@ -83,11 +97,11 @@ public:
 		BufferRef buffer;
 	};
 
-	using Voices = Raul::Array<Voice>;
+	using Voices = raul::Array<Voice>;
 
 	PortImpl(BufferFactory&      bufs,
 	         BlockImpl*          block,
-	         const Raul::Symbol& name,
+	         const raul::Symbol& name,
 	         uint32_t            index,
 	         uint32_t            poly,
 	         PortType            type,
@@ -99,10 +113,10 @@ public:
 	GraphType graph_type() const override { return GraphType::PORT; }
 
 	/** A port's parent is always a block, so static cast should be safe */
-	BlockImpl* parent_block() const { return (BlockImpl*)_parent; }
+	BlockImpl* parent_block() const { return reinterpret_cast<BlockImpl*>(_parent); }
 
 	/** Set the the voices (buffers) for this port in the audio thread. */
-	void set_voices(RunContext& context, MPtr<Voices>&& voices);
+	void set_voices(RunContext& ctx, raul::managed_ptr<Voices>&& voices);
 
 	/** Prepare for a new (external) polyphony value.
 	 *
@@ -115,7 +129,7 @@ public:
 	 * Audio thread.
 	 * \a poly Must be < the most recent value passed to prepare_poly.
 	 */
-	bool apply_poly(RunContext& context, uint32_t poly) override;
+	bool apply_poly(RunContext& ctx, uint32_t poly) override;
 
 	/** Return the number of arcs (pre-process thraed). */
 	virtual size_t num_arcs() const { return 0; }
@@ -140,14 +154,14 @@ public:
 		return _prepared_voices->at(voice).buffer;
 	}
 
-	void update_set_state(const RunContext& context, uint32_t v);
+	void update_set_state(const RunContext& ctx, uint32_t v);
 
-	void set_voice_value(const RunContext& context,
+	void set_voice_value(const RunContext& ctx,
 	                     uint32_t          voice,
 	                     FrameTime         time,
 	                     Sample            value);
 
-	void set_control_value(const RunContext& context,
+	void set_control_value(const RunContext& ctx,
 	                       FrameTime         time,
 	                       Sample            value);
 
@@ -164,9 +178,9 @@ public:
 	bool is_driver_port() const { return _is_driver_port; }
 
 	/** Called once per process cycle */
-	virtual void pre_process(RunContext& context);
-	virtual void pre_run(RunContext& context) {}
-	virtual void post_process(RunContext& context);
+	virtual void pre_process(RunContext& ctx);
+	virtual void pre_run(RunContext& ctx);
+	virtual void post_process(RunContext& ctx);
 
 	/** Clear/silence all buffers */
 	virtual void clear_buffers(const RunContext& ctx);
@@ -212,7 +226,7 @@ public:
 		return (_prepared_voices) ? _prepared_voices->size() : 1;
 	}
 
-	void set_buffer_size(RunContext& context, BufferFactory& bufs, size_t size);
+	void set_buffer_size(RunContext& ctx, BufferFactory& bufs, size_t size);
 
 	/** Return true iff this port is explicitly monitored.
 	 *
@@ -226,21 +240,25 @@ public:
 	void enable_monitoring(bool monitored) { _monitored = monitored; }
 
 	/** Monitor port value and broadcast to clients periodically. */
-	void monitor(RunContext& context, bool send_now=false);
+	void monitor(RunContext& ctx, bool send_now=false);
 
 	BufferFactory& bufs() const { return _bufs; }
 
-	BufferRef value_buffer(uint32_t voice);
+	BufferRef value_buffer(uint32_t voice) const;
 
 	BufferRef user_buffer(RunContext&) const { return _user_buffer; }
-	void      set_user_buffer(RunContext&, BufferRef b) { _user_buffer = b; }
+
+	void set_user_buffer(RunContext&, BufferRef b)
+	{
+		_user_buffer = std::move(b);
+	}
 
 	/** Return offset of the first value change after `offset`. */
 	virtual SampleCount next_value_offset(SampleCount offset,
 	                                      SampleCount end) const;
 
 	/** Update value buffer for `voice` to be current as of `offset`. */
-	void update_values(SampleCount offset, uint32_t voice);
+	void update_values(SampleCount offset, uint32_t voice) const;
 
 	void force_monitor_update() { _force_monitor_update = true; }
 
@@ -262,7 +280,7 @@ public:
 	bool is_toggled()     const { return _is_toggled; }
 
 protected:
-	typedef BufferRef (BufferFactory::*GetFn)(LV2_URID, LV2_URID, uint32_t);
+	using GetFn = BufferRef (BufferFactory::*)(LV2_URID, LV2_URID, uint32_t);
 
 	/** Set `voices` as the buffers to be used for this port.
 	 *
@@ -271,37 +289,37 @@ protected:
 	 *
 	 * @return true iff buffers are locally owned by the port
 	 */
-	virtual bool get_buffers(BufferFactory&      bufs,
-	                         GetFn               get,
-	                         const MPtr<Voices>& voices,
-	                         uint32_t            poly,
-	                         size_t              num_in_arcs) const;
+	virtual bool get_buffers(BufferFactory&                   bufs,
+	                         GetFn                            get,
+	                         const raul::managed_ptr<Voices>& voices,
+	                         uint32_t                         poly,
+	                         size_t num_in_arcs) const;
 
- 	BufferFactory&   _bufs;
-	uint32_t         _index;
-	uint32_t         _poly;
-	uint32_t         _buffer_size;
-	uint32_t         _frames_since_monitor;
-	float            _monitor_value;
-	float            _peak;
-	PortType         _type;
-	LV2_URID         _buffer_type;
-	Atom             _value;
-	Atom             _min;
-	Atom             _max;
-	MPtr<Voices>     _voices;
-	MPtr<Voices>     _prepared_voices;
-	BufferRef        _user_buffer;
-	std::atomic_flag _connected_flag;
-	bool             _monitored;
-	bool             _force_monitor_update;
-	bool             _is_morph;
-	bool             _is_auto_morph;
-	bool             _is_logarithmic;
-	bool             _is_sample_rate;
-	bool             _is_toggled;
-	bool             _is_driver_port;
-	bool             _is_output;
+	BufferFactory&            _bufs;
+	uint32_t                  _index;
+	uint32_t                  _poly;
+	uint32_t                  _buffer_size;
+	uint32_t                  _frames_since_monitor;
+	float                     _monitor_value;
+	float                     _peak;
+	PortType                  _type;
+	LV2_URID                  _buffer_type;
+	Atom                      _value;
+	Atom                      _min;
+	Atom                      _max;
+	raul::managed_ptr<Voices> _voices;
+	raul::managed_ptr<Voices> _prepared_voices;
+	BufferRef                 _user_buffer;
+	std::atomic_flag          _connected_flag;
+	bool                      _monitored;
+	bool                      _force_monitor_update;
+	bool                      _is_morph;
+	bool                      _is_auto_morph;
+	bool                      _is_logarithmic;
+	bool                      _is_sample_rate;
+	bool                      _is_toggled;
+	bool                      _is_driver_port;
+	bool                      _is_output;
 };
 
 } // namespace server

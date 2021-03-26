@@ -21,33 +21,33 @@
 #include "ingen/Log.hpp"
 #include "ingen/URIMap.hpp"
 #include "ingen/World.hpp"
-#include "lv2/atom/forge.h"
 #include "lv2/urid/urid.h"
 #include "raul/Socket.hpp"
 #include "sord/sordmm.hpp"
 
 #include <cerrno>
 #include <cstdint>
-#include <cstdio>
-#include <cstring>
 #include <memory>
 #include <mutex>
 #include <poll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <utility>
 
 namespace ingen {
 
-SocketReader::SocketReader(ingen::World&      world,
-                           Interface&         iface,
-                           SPtr<Raul::Socket> sock)
-	: _world(world)
-	, _iface(iface)
-	, _env()
-	, _inserter(nullptr)
-	, _msg_node(nullptr)
-	, _socket(std::move(sock))
-	, _exit_flag(false)
-	, _thread(&SocketReader::run, this)
+SocketReader::SocketReader(ingen::World&                 world,
+                           Interface&                    iface,
+                           std::shared_ptr<raul::Socket> sock)
+    : _world(world)
+    , _iface(iface)
+    , _env()
+    , _inserter(nullptr)
+    , _msg_node(nullptr)
+    , _socket(std::move(sock))
+    , _socket_error(0)
+    , _exit_flag(false)
+    , _thread(&SocketReader::run, this)
 {}
 
 SocketReader::~SocketReader()
@@ -93,22 +93,33 @@ SocketReader::write_statement(SocketReader*      iface,
 		object_datatype, object_lang);
 }
 
+size_t
+SocketReader::c_recv(void* buf, size_t size, size_t nmemb, void* stream)
+{
+	auto* self = static_cast<SocketReader*>(stream);
+
+	const ssize_t c = recv(self->_socket->fd(), buf, size * nmemb, MSG_WAITALL);
+	if (c < 0) {
+		self->_socket_error = errno;
+		return 0;
+	}
+
+	return c;
+}
+
+int
+SocketReader::c_err(void* stream)
+{
+	auto* self = static_cast<SocketReader*>(stream);
+
+	return self->_socket_error;
+}
+
 void
 SocketReader::run()
 {
 	Sord::World*  world = _world.rdf_world();
-	LV2_URID_Map& map   = _world.uri_map().urid_map_feature()->urid_map;
-
-	// Open socket as a FILE for reading directly with serd
-	std::unique_ptr<FILE, decltype(&fclose)> f{fdopen(_socket->fd(), "r"),
-	                                           &fclose};
-	if (!f) {
-		_world.log().error("Failed to open connection (%1%)\n",
-		                   strerror(errno));
-		// Connection gone, exit
-		_socket.reset();
-		return;
-	}
+	LV2_URID_Map& map   = _world.uri_map().urid_map();
 
 	// Set up a forge to build LV2 atoms from model
 	SordNode*  base_uri = nullptr;
@@ -119,7 +130,8 @@ SocketReader::run()
 		std::lock_guard<std::mutex> lock(_world.rdf_mutex());
 
 		// Use <ingen:/> as base URI, so relative URIs are like bundle paths
-		base_uri = sord_new_uri(world->c_obj(), (const uint8_t*)"ingen:/");
+		base_uri = sord_new_uri(world->c_obj(),
+		                        reinterpret_cast<const uint8_t*>("ingen:/"));
 
 		// Make a model and reader to parse the next Turtle message
 		_env = world->prefixes().c_obj();
@@ -131,29 +143,31 @@ SocketReader::run()
 
 	SerdReader* reader = serd_reader_new(
 		SERD_TURTLE, this, nullptr,
-		(SerdBaseSink)set_base_uri,
-		(SerdPrefixSink)set_prefix,
-		(SerdStatementSink)write_statement,
+		reinterpret_cast<SerdBaseSink>(set_base_uri),
+		reinterpret_cast<SerdPrefixSink>(set_prefix),
+		reinterpret_cast<SerdStatementSink>(write_statement),
 		nullptr);
 
 	serd_env_set_base_uri(_env, sord_node_to_serd_node(base_uri));
-	serd_reader_start_stream(reader, f.get(), (const uint8_t*)"(socket)", false);
+	serd_reader_start_source_stream(reader,
+	                                c_recv,
+	                                c_err,
+	                                this,
+	                                reinterpret_cast<const uint8_t*>(
+	                                    "(socket)"),
+	                                1);
 
 	// Make an AtomReader to call Ingen Interface methods based on Atom
 	AtomReader ar(_world.uri_map(), _world.uris(), _world.log(), _iface);
 
 	struct pollfd pfd{};
 	pfd.fd      = _socket->fd();
-	pfd.events  = POLLIN;
+	pfd.events  = POLLIN|POLLPRI;
 	pfd.revents = 0;
 
-	while (!_exit_flag) {
-		if (feof(f.get())) {
-			break;  // Lost connection
-		}
-
+	while (!_exit_flag && !_socket_error) {
 		// Wait for input to arrive at socket
-		int ret = poll(&pfd, 1, -1);
+		const int ret = poll(&pfd, 1, -1);
 		if (ret == -1 || (pfd.revents & (POLLERR|POLLHUP|POLLNVAL))) {
 			on_hangup();
 			break;  // Hangup
@@ -189,7 +203,6 @@ SocketReader::run()
 	std::lock_guard<std::mutex> lock(_world.rdf_mutex());
 
 	// Destroy everything
-	f.reset();
 	sord_inserter_free(_inserter);
 	serd_reader_end_stream(reader);
 	serd_reader_free(reader);
