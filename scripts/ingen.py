@@ -60,6 +60,8 @@ class Interface:
     def delete(self, subject):
         pass
 
+    def copy(self, subject, destination):
+        pass
 
 class Error(Exception):
     def __init__(self, msg, cause):
@@ -193,7 +195,7 @@ class Remote(Interface):
             msg = '\n'.join(msg)
 
         # Send message to server
-        self.sock.send(self.msgencode(msg) + b'\0')
+        self.sock.sendall(self.msgencode(msg) + b'\n')
 
         # Receive response and parse into a model
         response_str = self._get_prefixes_string() + self.recv()
@@ -298,3 +300,9 @@ class Remote(Interface):
         return self.send(['[]',
                           '	a patch:Delete ;',
                           '	patch:subject <%s> .' % subject])
+
+    def copy(self, subject, destination):
+        return self.send(['[]',
+                          ' a patch:Copy ;',
+                          'patch:subject <%s> ;' % subject,
+                          'patch:destination <%s> .' % destination])

@@ -18,6 +18,7 @@ sources = files(
   'Store.cpp',
   'StreamWriter.cpp',
   'TurtleWriter.cpp',
+  'JsonWriter.cpp',
   'URI.cpp',
   'URIMap.cpp',
   'URIs.cpp',

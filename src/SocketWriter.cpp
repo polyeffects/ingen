@@ -17,7 +17,7 @@
 #include <ingen/SocketWriter.hpp>
 
 #include <ingen/Message.hpp>
-#include <ingen/TurtleWriter.hpp>
+#include <ingen/JsonWriter.hpp>
 #include <ingen/URI.hpp>
 #include <raul/Socket.hpp>
 
@@ -37,18 +37,24 @@ SocketWriter::SocketWriter(URIMap&                       map,
                            URIs&                         uris,
                            const URI&                    uri,
                            std::shared_ptr<raul::Socket> sock)
-	: TurtleWriter(map, uris, uri)
+	: JsonWriter(map, uris, uri)
 	, _socket(std::move(sock))
 {}
 
 void
 SocketWriter::message(const Message& message)
 {
-	TurtleWriter::message(message);
-	if (std::get_if<BundleEnd>(&message)) {
-		// Send a null byte to indicate end of bundle
-		const char end[] = { 0 };
+	if (std::get_if<BundleBegin>(&message)) {
+		// Send a { at the start pf a bundle
+		const char end[] = { 0x7B }; // {
 		send(_socket->fd(), end, 1, MSG_NOSIGNAL);
+	}
+
+	JsonWriter::message(message);
+	if (std::get_if<BundleEnd>(&message)) {
+		// Send a } then null byte to indicate end of bundle
+		const char end[] = { 0x7D, 0 };
+		send(_socket->fd(), end, 2, MSG_NOSIGNAL);
 	}
 }
 

@@ -18,7 +18,7 @@
 #define INGEN_SOCKETWRITER_HPP
 
 #include <ingen/Message.hpp>
-#include <ingen/TurtleWriter.hpp>
+#include <ingen/JsonWriter.hpp>
 #include <ingen/ingen.h>
 
 #include <cstddef>
@@ -34,9 +34,9 @@ class URI;
 class URIMap;
 class URIs;
 
-/** An Interface that writes Turtle messages to a socket.
+/** An Interface that writes Json messages to a socket.
  */
-class INGEN_API SocketWriter : public TurtleWriter
+class INGEN_API SocketWriter : public JsonWriter
 {
 public:
 	SocketWriter(URIMap&                       map,
