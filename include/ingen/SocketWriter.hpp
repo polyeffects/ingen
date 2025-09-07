@@ -50,6 +50,7 @@ public:
 
 protected:
 	std::shared_ptr<raul::Socket> _socket;
+    bool bundle_active;
 };
 
 } // namespace ingen

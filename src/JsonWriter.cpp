@@ -99,6 +99,7 @@ JsonWriter::write(const LV2_Atom* msg, int32_t)
 	sratom_write(_sratom, &_map.urid_unmap(), 0,
 	             nullptr, nullptr, msg->type, msg->size, LV2_ATOM_BODY_CONST(msg));
 	serd_writer_finish(_writer);
+    // can't work out how to wrap bundles sensibly in serd, so break them into messages here
 	return true;
 }
 

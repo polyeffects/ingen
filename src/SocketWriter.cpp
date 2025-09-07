@@ -39,22 +39,37 @@ SocketWriter::SocketWriter(URIMap&                       map,
                            std::shared_ptr<raul::Socket> sock)
 	: JsonWriter(map, uris, uri)
 	, _socket(std::move(sock))
-{}
+{
+    bundle_active = false;
+}
 
 void
 SocketWriter::message(const Message& message)
 {
+    // if we're in a bundle, wait to send in a group, 
+    // otherwise send message straight away
 	if (std::get_if<BundleBegin>(&message)) {
 		// Send a { at the start pf a bundle
 		const char end[] = { 0x7B }; // {
 		send(_socket->fd(), end, 1, MSG_NOSIGNAL);
+        bundle_active = true;
 	}
+    else if (bundle_active) {
+		// otherwise, write a comma
+		const char end[] = { 0x2C };
+		send(_socket->fd(), end, 1, MSG_NOSIGNAL);
+	} else {
+        // bundle not active, send a start {
+		const char end[] = { 0x7B }; // {
+		send(_socket->fd(), end, 1, MSG_NOSIGNAL);
+    }
 
 	JsonWriter::message(message);
-	if (std::get_if<BundleEnd>(&message)) {
+	if (std::get_if<BundleEnd>(&message) or !bundle_active) {
 		// Send a } then null byte to indicate end of bundle
 		const char end[] = { 0x7D, 0 };
 		send(_socket->fd(), end, 2, MSG_NOSIGNAL);
+        bundle_active = false;
 	}
 }
 
