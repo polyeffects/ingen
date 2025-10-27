@@ -251,6 +251,8 @@ ControlBindings::start_learn(PortImpl* port)
 	Binding* b = _learn_binding.load();
 	if (!b) {
 		_learn_binding = new Binding();
+        b = _learn_binding.load();
+        b->port = port; // need to specify port here
 	} else {
 		b->port = port;
 	}
@@ -380,7 +382,6 @@ ControlBindings::set_port_value(RunContext& ctx,
 	float min = 0.0f;
 	float max = 1.0f;
 	get_range(ctx, port, &min, &max);
-
 	const float val = control_to_port_value(ctx, port, type, value);
 
 	// TODO: Set port value property so it is saved
